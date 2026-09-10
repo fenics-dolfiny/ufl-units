@@ -1,0 +1,15 @@
+# python
+*.egg-info
+__pycache__
+dist
+build
+
+# tool caches
+.mypy_cache
+.pytest_cache
+.ruff_cache
+
+# test reports
+report.xml
+coverage.xml
+*.coverage*

@@ -1,0 +1,129 @@
+[build-system]
+# setuptools >= 77 for the PEP 639 `license` expression and `license-files`
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ufl-units"
+version = "0.1.0.dev0"
+description = "Physical units and dimensional analysis for UFL expressions and forms."
+authors = [
+  { name = "Michal Habera", email = "michal.habera@gmail.com" },
+  { name = "Andreas Zilian", email = "andreas.zilian@uni.lu" },
+  { name = "Paul T. Kühner", email = "paul.kuehner@uni.lu" },
+]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12.0"
+dependencies = ["fenics-ufl", "numpy", "sympy"]
+
+[dependency-groups]
+lint-format = ["ruff"]
+lint-typing = ["mypy", "ty"]
+lint-spell-check = ["typos"]
+lint = [
+  { include-group = "lint-format" },
+  { include-group = "lint-typing" },
+  { include-group = "lint-spell-check" },
+]
+# Concrete elements live in basix, not in UFL, so a mesh cannot be built from UFL alone.
+test = ["pytest", "pytest-xdist", "coverage", "fenics-basix"]
+
+[project.urls]
+repository = "https://github.com/fenics-dolfiny/ufl-units"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ufl_units = ["py.typed"]
+
+[tool.mypy]
+disallow_untyped_defs = false
+disallow_any_unimported = false
+no_implicit_optional = false
+check_untyped_defs = false
+warn_return_any = true
+warn_unused_ignores = true
+show_error_codes = true
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unreachable = true
+
+[tool.ruff]
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+  "D",   # pydocstyle
+  "E",   # pycodestyle
+  "W",   # pycodestyle
+  "F",   # pyflakes
+  "I",   # isort - use standalone isort
+  "RUF", # Ruff-specific rules
+  "UP",  # pyupgrade
+  "ICN", # flake8-import-conventions
+  "NPY", # numpy-specific rules
+  "FLY", # use f-string not static joins
+]
+ignore = [
+  "D1",   # undocumented
+  "D203", # incompatible with D203 `no-blank-line-before-class`
+  "D213", # incomptabile with D212 `multi-line-summary-first-line`
+]
+unfixable = [
+  "F401", # skip removal of unused imports
+]
+
+allowed-confusables = ["σ", "×"]
+
+[tool.ruff.lint.per-file-ignores]
+"!src/**.py" = ["D"] # no docstring linting outside of src/
+
+[tool.ruff.lint.isort]
+# These rules mirror dolfiny's, including `ufl_units` being sorted as a third-party
+# package. While this repository is developed nested in a dolfiny checkout, the editor
+# resolves the ruff configuration of the workspace root, and any rule that differs from
+# it makes format-on-save and this configuration undo each other on every save.
+known-third-party = ["numpy", "pytest", "sympy", "ufl_units"]
+section-order = [
+  "future",
+  "standard-library",
+  "mpi",
+  "fenics",
+  "third-party",
+  "first-party",
+  "local-folder",
+]
+
+[tool.ruff.lint.isort.sections]
+"mpi" = ["mpi4py", "petsc4py"]
+"fenics" = ["basix", "dolfinx", "ffcx", "ufl"]
+
+[tool.ruff.lint.flake8-import-conventions.extend-aliases]
+"numpy.typing" = "npt"
+"numpy" = "np"
+
+[tool.ruff.lint.flake8-import-conventions]
+banned-from = ["numpy"]
+
+[tool.ty.rules]
+possibly-missing-submodule = "ignore"
+unused-type-ignore-comment = "ignore"
+unresolved-import = "ignore"
+unresolved-attribute = "ignore"
+invalid-argument-type = "ignore"
+unsupported-operator = "ignore"
+
+[tool.pytest.ini_options]
+addopts = "--color=yes --junitxml=report.xml"
+
+[tool.coverage.run]
+parallel = true
+branch = true
+source = ["ufl_units"]
+
+[tool.typos.default]
+extend-ignore-identifiers-re = ["Ue", "2nd"]

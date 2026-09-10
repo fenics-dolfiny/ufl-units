@@ -1,0 +1,74 @@
+stages:
+  - lint
+  - test
+
+workflow:
+  auto_cancel:
+    on_new_commit: interruptible
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+default:
+  interruptible: true
+  image: python:3.13
+  tags:
+    - zed
+    - saas-linux-large-amd64
+
+variables:
+  FORCE_COLOR: 1
+  PIP_DISABLE_PIP_VERSION_CHECK: 1
+
+ruff:
+  stage: lint
+  script:
+    - pip install --group lint-format
+    - ruff format --check
+    - ruff check .
+
+mypy:
+  stage: lint
+  script:
+    - pip install --group lint-typing
+    - pip install . --group test
+    - mypy -p ufl_units
+    - mypy test/ --explicit-package-bases
+
+ty:
+  stage: lint
+  allow_failure: true # mypy is blocking
+  script:
+    - pip install --group lint-typing
+    - pip install . --group test
+    - ty check --color always src/ufl_units
+    - ty check --color always test
+
+typos:
+  stage: lint
+  image: python:3.13-slim
+  script:
+    - pip install --group lint-spell-check
+    - typos
+
+prettier:
+  stage: lint
+  image: node:current-alpine
+  script:
+    - npm install prettier prettier-plugin-toml
+    - npx prettier . --check --plugin prettier-plugin-toml
+
+test:
+  stage: test
+  script:
+    - pip install . --group test
+    - pytest -n auto test/
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_JOB_NAME-$CI_COMMIT_REF_SLUG-artifacts"
+    paths:
+      - "report.xml"
+    reports:
+      junit: report.xml
+    expire_in: 2 hours
