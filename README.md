@@ -62,6 +62,13 @@ class Quantity(dolfinx.fem.Constant, ufl_units.QuantityMixin):
 
 This is what [`dolfiny`](https://dolfiny.uni.lu) does, see `dolfiny.units`.
 
+The dolfinx flavour above ships as `ufl_units.backends.dolfinx`, importable wherever dolfinx is
+installed:
+
+```python
+from ufl_units.backends.dolfinx import Quantity
+```
+
 # Development
 
 Two devcontainers are provided, so that backend integration can be worked on against

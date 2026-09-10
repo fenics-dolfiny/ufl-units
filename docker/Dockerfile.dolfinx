@@ -10,5 +10,4 @@ FROM dolfinx/dolfinx:${DOLFINX_TAG}
 # --group needs pip >= 25.1
 RUN pip install --no-cache-dir --upgrade pip
 
-# numpy, fenics-ufl and fenics-basix come with DOLFINx, sympy does not
 RUN pip install --no-cache-dir sympy
