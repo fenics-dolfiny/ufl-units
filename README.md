@@ -62,6 +62,18 @@ class Quantity(dolfinx.fem.Constant, ufl_units.QuantityMixin):
 
 This is what [`dolfiny`](https://dolfiny.uni.lu) does, see `dolfiny.units`.
 
+# Development
+
+Two devcontainers are provided, so that backend integration can be worked on against
+either finite element library. Pick one when reopening the repository in a container:
+
+- `ufl-units (dolfinx)`, on `dolfinx/dolfinx`
+- `ufl-units (firedrake)`, on `firedrakeproject/firedrake-vanilla-default`
+
+Both install `ufl-units` with `--no-deps`, leaving the image's own `fenics-ufl` in place.
+The tests themselves need neither library, only `fenics-basix` for a mesh to hang
+function spaces off, and run in any environment with `pytest -n auto test/`.
+
 # License
 
 `ufl-units` is free software distributed under the terms of the MIT License. See [LICENSE](LICENSE) for the full text.

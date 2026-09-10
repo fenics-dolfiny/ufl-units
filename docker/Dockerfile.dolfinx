@@ -1,0 +1,14 @@
+# Development image for ufl-units, on top of DOLFINx.
+#
+# The image installs its Python stack into the /dolfinx-env virtualenv, which is already
+# on PATH. fenics-ufl, fenics-basix and numpy come from that stack and must not be
+# replaced: install ufl-units itself with --no-deps (see devcontainer.json) and add its
+# remaining dependencies here explicitly.
+ARG DOLFINX_TAG=nightly
+FROM dolfinx/dolfinx:${DOLFINX_TAG}
+
+# --group needs pip >= 25.1
+RUN pip install --no-cache-dir --upgrade pip
+
+# numpy, fenics-ufl and fenics-basix come with DOLFINx, sympy does not
+RUN pip install --no-cache-dir sympy

@@ -20,8 +20,8 @@ def print_table(rows: list[list[Any]], headers: list[str], outstream=logger.info
     # Convert all items to strings
     str_rows = [[str(item) for item in row] for row in rows]
 
-    # Determine the maximum width for each column. Note the single list argument to max,
-    # so that a table without rows falls back to the width of its headers.
+    # Widest entry per column. The single list argument to max keeps a table
+    # without rows working, falling back to the header widths.
     col_widths = [
         max([len(headers[i]), *(len(row[i]) for row in str_rows)]) for i in range(len(headers))
     ]

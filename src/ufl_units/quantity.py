@@ -14,15 +14,13 @@ logger = logging.getLogger(__name__)
 class QuantityMixin:
     """Unit-carrying behaviour of a scalar quantity, independent of any value backend.
 
-    A quantity couples a numerical ``scale`` with a sympy ``unit`` and a symbolic
-    ``symbol`` used for reporting. The scale/unit pair is reduced to a plain
-    ``factor`` expressed in the base units of ``unit_system``, which is the number a
-    value backend is expected to expose to the form compiler.
+    A quantity couples a numerical ``scale`` with a sympy ``unit`` and a ``symbol`` used
+    for reporting. The scale/unit pair reduces to a plain ``factor`` in the base units of
+    ``unit_system``, the number a backend exposes to the form compiler.
 
-    This class holds no reference to a UFL node, so it can be mixed into any
-    constant-like class. Concrete flavours combine it with a UFL terminal, see
-    :class:`Quantity` for the symbolic one. Backends that carry a mutable value
-    override :meth:`_update_value` to keep that value in sync with ``scale``.
+    Holding no reference to a UFL node, it can be mixed into any constant-like class; see
+    :class:`Quantity` for the symbolic flavour. Backends carrying a mutable value
+    override :meth:`_update_value` to keep it in sync with ``scale``.
     """
 
     _scale: float | int
@@ -34,8 +32,7 @@ class QuantityMixin:
     _dimensional_dependencies: dict[Dimension, int]
 
     if TYPE_CHECKING:
-        # Provided by the UFL terminal this mixin is combined with, declared read-only
-        # here so that it does not clash with the property of that terminal.
+        # Provided by the UFL terminal this mixin is combined with
         @property
         def ufl_shape(self) -> tuple[int, ...]: ...
 
@@ -138,9 +135,8 @@ class QuantityMixin:
 class Quantity(ufl.Constant, QuantityMixin):
     """Symbolic quantity, a UFL constant on ``domain`` carrying units.
 
-    Note the order of the bases: form compilers resolve the handler of a terminal by
-    walking ``__bases__[0]`` up to a type they know, so the UFL base has to come first.
-    The two dunders the UFL base shadows are re-bound below.
+    The UFL base comes first because form compilers resolve a terminal's handler by
+    walking ``__bases__[0]``. The two dunders it shadows are re-bound below.
 
     Parameters
     ----------
