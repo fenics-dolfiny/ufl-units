@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from typing import NamedTuple, overload
 
 from ufl.algorithms.map_integrands import map_integrands
+from ufl.constantvalue import Zero, as_ufl
 from ufl.core.expr import Expr
 from ufl.corealg.map_dag import map_expr_dag
 from ufl.corealg.multifunction import MultiFunction
@@ -77,11 +78,17 @@ class QuantityFactorizer(MultiFunction):
         self.factors.setdefault(o, np.zeros(len(self._quantities)))
         return self.reuse_if_untouched(o, *ops)
 
+    def _constraining_factors(self, operands) -> list[np.ndarray]:
+        """Operand factors that constrain the dimension. Zero fits any dimension."""
+        return [
+            self.factors[op] for op in operands if op in self.factors and not isinstance(op, Zero)
+        ]
+
     def linear(self, o, *ops):
         # Linear nodes whose operands have the same factor (e.g. sum, grad, etc.)
         # can be assigned that factor. In check mode, only dimensional equivalence
         # is enforced, so the first operand is used as a dimension witness.
-        factors = [self.factors[op] for op in o.ufl_operands if op in self.factors]
+        factors = self._constraining_factors(o.ufl_operands)
 
         if len(factors) > 0:
             self._check_operands(o, factors[0])
@@ -93,7 +100,7 @@ class QuantityFactorizer(MultiFunction):
         # Inhomogeneous nodes (e.g. sin(x), exp(x), etc.) must have dimensionless
         # operands. In factorize mode, these operands must also have trivial factor,
         # because no multiplicative scale can be pulled out of a nonlinear function.
-        factors = [self.factors[op] for op in o.ufl_operands if op in self.factors]
+        factors = self._constraining_factors(o.ufl_operands)
 
         if len(factors) > 0:
             zero = np.zeros_like(factors[0])
@@ -102,6 +109,42 @@ class QuantityFactorizer(MultiFunction):
         else:
             self.factors.setdefault(o, np.zeros(len(self._quantities)))
 
+        return self.reuse_if_untouched(o, *ops)
+
+    def conditional(self, o, *ops):
+        # Only the two branches carry a dimension, the condition itself is a boolean.
+        branches = o.ufl_operands[1:]
+        factors = self._constraining_factors(branches)
+
+        if len(factors) > 0:
+            self._check_operands(o, factors[0], branches)
+            self.factors[o] = factors[0]
+
+        return self.reuse_if_untouched(o, *ops)
+
+    def condition(self, o, *ops):
+        # Comparing requires operands of one dimension, but the result is a boolean.
+        factors = self._constraining_factors(o.ufl_operands)
+
+        if len(factors) > 0:
+            self._check_operands(o, factors[0])
+
+        self.factors[o] = np.zeros(len(self._quantities))
+        return self.reuse_if_untouched(o, *ops)
+
+    def determinant(self, o, *ops):
+        a = o.ufl_operands[0]
+        self.factors[o] = (a.ufl_shape[0] if a.ufl_shape else 1) * self.factors[a]
+        return self.reuse_if_untouched(o, *ops)
+
+    def cofactor(self, o, *ops):
+        a = o.ufl_operands[0]
+        self.factors[o] = (a.ufl_shape[0] - 1) * self.factors[a]
+        return self.reuse_if_untouched(o, *ops)
+
+    def inverse(self, o, *ops):
+        a = o.ufl_operands[0]
+        self.factors[o] = -self.factors[a]
         return self.reuse_if_untouched(o, *ops)
 
     def multi_index(self, o, *ops):
@@ -116,7 +159,8 @@ class QuantityFactorizer(MultiFunction):
             idx = self._quantities.index(o)
             self.factors[o] = np.zeros(len(self._quantities))
             self.factors[o][idx] = 1
-            return 1
+            # A UFL node, not a plain int: some operators reject non-UFL operands.
+            return as_ufl(1)
         else:
             self.factors.setdefault(o, np.zeros(len(self._quantities)))
             return self.reuse_if_untouched(o, *ops)
@@ -124,13 +168,13 @@ class QuantityFactorizer(MultiFunction):
     def expr_list(self, o, *ops):
         return self.reuse_if_untouched(o, *ops)
 
-    def _check_operands(self, o, reference_factor):
+    def _check_operands(self, o, reference_factor, operands=None):
         r"""Check that all operands of the expression are consistent with a reference factor.
 
         Verifies that all operands of a given expression have compatible units/dimensions
         and, in factorize mode, identical factors.
         """
-        factors = [self.factors[op] for op in o.ufl_operands if op in self.factors]
+        factors = self._constraining_factors(o.ufl_operands if operands is None else operands)
 
         f0_expr = expand(reference_factor, [q.dimension for q in self._quantities]).simplify()
         f0_symbol = expand(reference_factor, [q.symbol for q in self._quantities])
@@ -164,21 +208,36 @@ class QuantityFactorizer(MultiFunction):
     indexed = linear
     grad = linear
     div = linear
+    curl = linear
+    nabla_grad = linear
+    nabla_div = linear
     conj = linear
+    real = linear
+    imag = linear
+    abs = linear
     index_sum = linear
     transposed = linear
     deviatoric = linear
     sym = linear
+    skew = linear
+    perp = linear
     trace = linear
     variable = linear
     coefficient_derivative = linear
     component_tensor = linear
+    list_tensor = linear
+    restricted = linear
+    cell_avg = linear
+    facet_avg = linear
+    max_value = linear
+    min_value = linear
 
     variable_derivative = division
 
     inner = product
     dot = product
     cross = product
+    outer = product
 
     expr = inhomogeneous
 

@@ -92,6 +92,8 @@ class UnitTransformer(MultiFunction):
 
     div = grad
     curl = grad
+    nabla_grad = grad
+    nabla_div = grad
 
     # Scale like a single length. Note the handler names UFL dispatches these to.
     circumradius = spatial_coordinate

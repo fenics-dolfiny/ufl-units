@@ -204,3 +204,132 @@ def test_normalize_none_factor(mesh):
 
     with pytest.raises(ValueError, match="has a None factor"):
         normalize(unfactorized, "reference", [length])
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda q, u: abs(q * u),
+        lambda q, u: ufl.as_vector([q * u, q * u])[0],
+        lambda q, u: ufl.max_value(q * u, q),
+        lambda q, u: ufl.min_value(q * u, q),
+        lambda q, u: ufl.real(q * u),
+        lambda q, u: ufl.imag(q * u),
+        lambda q, u: ufl.cell_avg(q * u),
+        lambda q, u: ufl.facet_avg(q * u),
+        lambda q, u: (q * u)("+"),
+        lambda q, u: (q * u)("-"),
+        lambda q, u: ufl.conditional(ufl.gt(q * u, q), q * u, q),
+    ],
+)
+def test_scalar_nodes(mesh, V, build):
+    """These nodes pass the dimension of their operands through unchanged."""
+    u = ufl.Coefficient(V)
+    u_ref = Quantity(mesh, 1.0, syu.kelvin, "u_ref")
+
+    dimsys = syu.si.SI.get_dimension_system()
+    assert dimsys.equivalent_dims(get_dimension(build(u_ref, u), [u_ref]), syu.temperature)
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda q, u: ufl.grad(q * u),
+        lambda q, u: ufl.nabla_grad(q * u),
+        lambda q, u: ufl.div(q * u),
+        lambda q, u: ufl.nabla_div(q * u),
+        lambda q, u: ufl.curl(q * u),
+        lambda q, u: ufl.skew(ufl.grad(q * u)),
+        lambda q, u: ufl.perp(q * u),
+    ],
+)
+def test_vector_nodes(mesh, W, build):
+    """Derivatives and shape-preserving tensor algebra keep the dimension of the operand."""
+    u = ufl.Coefficient(W)
+    u_ref = Quantity(mesh, 1.0, syu.meter / syu.second, "u_ref")
+
+    dimsys = syu.si.SI.get_dimension_system()
+    dim = get_dimension(build(u_ref, u), [u_ref])
+    assert dimsys.equivalent_dims(dim, syu.length / syu.time)
+
+
+def test_tensor_algebra(mesh, W):
+    """Outer products and the determinant family combine dimensions multiplicatively."""
+    u = ufl.Coefficient(W)
+    u_ref = Quantity(mesh, 1.0, syu.meter / syu.second, "u_ref")
+    velocity = syu.length / syu.time
+    grad_u = ufl.grad(u_ref * u)
+
+    dimsys = syu.si.SI.get_dimension_system()
+    for expr, expected in [
+        (ufl.outer(u_ref * u, u_ref * u), velocity**2),
+        (ufl.det(grad_u), velocity**2),
+        (ufl.cofac(grad_u), velocity),
+        (ufl.inv(grad_u), 1 / velocity),
+    ]:
+        assert dimsys.equivalent_dims(get_dimension(expr, [u_ref]), expected)
+
+
+def test_factorize_tensor_algebra(mesh, W):
+    """The scale comes out raised to the power the operation applies to it."""
+    u = ufl.Coefficient(W)
+    u_ref = Quantity(mesh, 1.0, syu.meter, "u_ref")
+    grad_u = ufl.grad(u_ref * u)
+
+    assert factorize(ufl.det(grad_u), [u_ref]).factor[0] == 2
+    assert factorize(ufl.cofac(grad_u), [u_ref]).factor[0] == 1
+    assert factorize(ufl.inv(grad_u), [u_ref]).factor[0] == -1
+    assert factorize((u_ref * u)("+"), [u_ref]).factor[0] == 1
+
+
+def test_zero(mesh, V):
+    """Zero carries no dimension of its own, so it may stand beside a dimensional term."""
+    u = ufl.Coefficient(V)
+    u_ref = Quantity(mesh, 1.0, syu.kelvin, "u_ref")
+
+    dimsys = syu.si.SI.get_dimension_system()
+    expr = ufl.conditional(ufl.gt(u, 1), u_ref * u, ufl.zero())
+    assert dimsys.equivalent_dims(get_dimension(expr, [u_ref]), syu.temperature)
+
+
+def test_condition_dimensionless(mesh, V):
+    """A comparison is a boolean, so it contributes no dimension to the conditional."""
+    u = ufl.Coefficient(V)
+    u_ref = Quantity(mesh, 1.0, syu.kelvin, "u_ref")
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+
+    dimsys = syu.si.SI.get_dimension_system()
+    expr = ufl.conditional(ufl.gt(length * u, length), u_ref, 2 * u_ref)
+    assert dimsys.equivalent_dims(get_dimension(expr, [u_ref, length]), syu.temperature)
+
+
+def test_condition_operands(mesh, V):
+    """Only quantities of one dimension can be compared."""
+    u = ufl.Coefficient(V)
+    u_ref = Quantity(mesh, 1.0, syu.kelvin, "u_ref")
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+
+    expr = ufl.conditional(ufl.gt(u_ref * u, length), u_ref, 2 * u_ref)
+    with pytest.raises(RuntimeError, match="Inconsistent dimensions"):
+        factorize(expr, [u_ref, length], mode="check")
+
+
+def test_conditional_branches(mesh, V):
+    """The two branches of a conditional must share a dimension."""
+    u = ufl.Coefficient(V)
+    u_ref = Quantity(mesh, 1.0, syu.kelvin, "u_ref")
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+
+    expr = ufl.conditional(ufl.gt(u, 1), u_ref * u, length)
+    with pytest.raises(RuntimeError, match="Inconsistent dimensions"):
+        factorize(expr, [u_ref, length], mode="check")
+
+
+def test_list_tensor(mesh, V):
+    """The components assembled into a tensor must share a dimension."""
+    u = ufl.Coefficient(V)
+    u_ref = Quantity(mesh, 1.0, syu.kelvin, "u_ref")
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+
+    with pytest.raises(RuntimeError, match="Inconsistent dimensions"):
+        factorize(ufl.as_vector([u_ref * u, length * u]), [u_ref, length], mode="check")
