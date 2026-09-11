@@ -35,8 +35,10 @@ image-dolfinx:
     - docker:dind
   script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    # --provenance=false: with the default attestations buildx pushes an image index,
+    # which the GitLab registry rejects with "blob unknown to registry".
     - >-
-      docker build --pull --build-arg DOLFINX_TAG="$DOLFINX_TAG"
+      docker build --pull --provenance=false --build-arg DOLFINX_TAG="$DOLFINX_TAG"
       -f docker/Dockerfile.dolfinx -t "$DOLFINX_IMAGE" .
     - docker push "$DOLFINX_IMAGE"
 
@@ -49,7 +51,7 @@ image-firedrake:
   script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - >-
-      docker build --pull --build-arg FIREDRAKE_TAG="$FIREDRAKE_TAG"
+      docker build --pull --provenance=false --build-arg FIREDRAKE_TAG="$FIREDRAKE_TAG"
       -f docker/Dockerfile.firedrake -t "$FIREDRAKE_IMAGE" .
     - docker push "$FIREDRAKE_IMAGE"
 
