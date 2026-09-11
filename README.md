@@ -60,8 +60,6 @@ class Quantity(dolfinx.fem.Constant, ufl_units.QuantityMixin):
     __repr__ = ufl_units.QuantityMixin.__repr__
 ```
 
-This is what [`dolfiny`](https://dolfiny.uni.lu) does, see `dolfiny.units`.
-
 The dolfinx flavour above ships as `ufl_units.backends.dolfinx`, and the Firedrake one as
 `ufl_units.backends.firedrake`; each is importable wherever its backend is installed:
 
