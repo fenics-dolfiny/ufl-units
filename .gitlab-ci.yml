@@ -1,4 +1,5 @@
 stages:
+  - build
   - lint
   - test
 
@@ -21,9 +22,25 @@ default:
 variables:
   FORCE_COLOR: 1
   PIP_DISABLE_PIP_VERSION_CHECK: 1
+  DOLFINX_TAG: nightly
+  DOLFINX_IMAGE: $CI_REGISTRY_IMAGE/dolfinx:$CI_COMMIT_REF_SLUG
+
+# Publish the development image to the project registry, for `test-dolfinx` to run on.
+image-dolfinx:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - >-
+      docker build --pull --build-arg DOLFINX_TAG="$DOLFINX_TAG"
+      -f docker/Dockerfile.dolfinx -t "$DOLFINX_IMAGE" .
+    - docker push "$DOLFINX_IMAGE"
 
 ruff:
   stage: lint
+  needs: [] # nothing to wait for, the image build is unrelated
   script:
     - pip install --group lint-format
     - ruff format --check
@@ -31,6 +48,7 @@ ruff:
 
 mypy:
   stage: lint
+  needs: []
   script:
     - pip install --group lint-typing
     - pip install . --group test
@@ -39,6 +57,7 @@ mypy:
 
 ty:
   stage: lint
+  needs: []
   allow_failure: true # mypy is blocking
   script:
     - pip install --group lint-typing
@@ -48,6 +67,7 @@ ty:
 
 typos:
   stage: lint
+  needs: []
   image: python:3.13-slim
   script:
     - pip install --group lint-spell-check
@@ -55,6 +75,7 @@ typos:
 
 prettier:
   stage: lint
+  needs: []
   image: node:current-alpine
   script:
     - npm install prettier prettier-plugin-toml
@@ -62,9 +83,29 @@ prettier:
 
 test:
   stage: test
+  needs: []
   script:
     - pip install . --group test
     - pytest -n auto test/
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_JOB_NAME-$CI_COMMIT_REF_SLUG-artifacts"
+    paths:
+      - "report.xml"
+    reports:
+      junit: report.xml
+    expire_in: 2 hours
+
+test-dolfinx:
+  stage: test
+  image: $DOLFINX_IMAGE
+  needs:
+    - image-dolfinx
+  script:
+    # As in the devcontainer, ufl-units goes in with --no-deps so that the image's own
+    # fenics-ufl, fenics-basix and numpy stay in place.
+    - pip install --group test
+    - pip install --no-deps --no-build-isolation .
+    - python -m pytest -n auto test/
   artifacts:
     name: "$CI_PROJECT_NAME-$CI_JOB_NAME-$CI_COMMIT_REF_SLUG-artifacts"
     paths:
