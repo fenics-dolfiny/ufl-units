@@ -1,0 +1,19 @@
+# Development image for ufl-units, on top of Firedrake.
+#
+# Firedrake is installed as a system package in this image, so there is no venv to
+# activate. It also ships an editable fenics-ufl checked out from git under /opt, which
+# must not be replaced: install ufl-units itself with --no-deps (see .devcontainer.json)
+# and add its remaining dependencies here explicitly.
+ARG FIREDRAKE_TAG=latest
+FROM firedrakeproject/firedrake-vanilla-default:${FIREDRAKE_TAG}
+
+# --group needs pip >= 25.1, newer than the one in ubuntu:24.04
+RUN pip install --no-cache-dir --upgrade --ignore-installed --break-system-packages pip setuptools
+
+# numpy and fenics-ufl come with Firedrake, sympy does not
+RUN pip install --no-cache-dir sympy
+
+RUN apt-get -y update && \
+    apt-get -y install --no-install-recommends git less nano && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*

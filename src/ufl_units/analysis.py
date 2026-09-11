@@ -105,7 +105,7 @@ def buckingham_pi_analysis(
         )
         for pi_group in pi_groups
     ]
-    # Guarded, as a set of dimensionally independent quantities has no groups to average
+    # Guarded: dimensionally independent quantities yield no groups to average
     average_group_value = np.mean(group_values) if group_values else np.nan
 
     for i, pi_group in enumerate(pi_groups):

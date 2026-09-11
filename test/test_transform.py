@@ -150,6 +150,7 @@ def test_cell_volume(mesh):
     length = Quantity(mesh, 1.0, syu.meter, "L")
 
     factorized = factorize(ufl.CellVolume(mesh), [length], mapping={mesh: length})
+    assert factorized.factor is not None
     assert factorized.factor[0] == pytest.approx(2.0)  # triangle, tdim == 2
 
 
@@ -158,6 +159,7 @@ def test_facet_area(mesh):
     length = Quantity(mesh, 1.0, syu.meter, "L")
 
     factorized = factorize(ufl.FacetArea(mesh), [length], mapping={mesh: length})
+    assert factorized.factor is not None
     assert factorized.factor[0] == pytest.approx(1.0)  # triangle facet, tdim - 1 == 1
 
 

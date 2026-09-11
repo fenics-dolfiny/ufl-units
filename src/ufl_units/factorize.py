@@ -26,11 +26,9 @@ class FactorizedExpr(NamedTuple):
 class QuantityFactorizer(MultiFunction):
     """Pull the quantities out of an expression, tracking their exponents per node.
 
-    Each node is assigned an exponent vector over the list of ``quantities``. In
-    ``factorize`` mode the quantities are replaced by one, so the returned expression
-    is the dimensionless remainder and the root exponent vector is the factor that was
-    pulled out. In ``check`` mode the expression is left untouched and only dimensional
-    consistency of the operands is verified.
+    Each node gets an exponent vector over ``quantities``. In ``factorize`` mode the
+    quantities are replaced by one, leaving the dimensionless remainder and the factor
+    pulled out. ``check`` mode only verifies dimensional consistency of the operands.
     """
 
     factors: dict[Expr, np.ndarray]
@@ -68,6 +66,13 @@ class QuantityFactorizer(MultiFunction):
         return self.reuse_if_untouched(o, *ops)
 
     def independent(self, o, *ops):
+        if isinstance(o, QuantityMixin):
+            raise NotImplementedError(
+                f"{type(o).__name__} is a quantity dispatched as "
+                f"'{o._ufl_handler_name_}', which QuantityFactorizer does not handle. "
+                "Alias that handler name to `quantity_terminal`."
+            )
+
         self.factors.setdefault(o, np.zeros(len(self._quantities)))
         return self.reuse_if_untouched(o, *ops)
 
@@ -104,7 +109,8 @@ class QuantityFactorizer(MultiFunction):
     def label(self, o, *ops):
         return self.reuse_if_untouched(o, *ops)
 
-    def constant(self, o, *ops):
+    def quantity_terminal(self, o, *ops):
+        """Handle a terminal that may be one of the quantities being factorized out."""
         if o in self._quantities:
             idx = self._quantities.index(o)
             self.factors[o] = np.zeros(len(self._quantities))
@@ -146,6 +152,12 @@ class QuantityFactorizer(MultiFunction):
                 )
 
     terminal = independent
+
+    # The terminal a backend builds a quantity from: ufl.Constant (UFL, DOLFINx), a
+    # Coefficient (function on a real space), or Firedrake's own registered type.
+    constant = quantity_terminal
+    coefficient = quantity_terminal
+    firedrake_constant = quantity_terminal
 
     sum = linear
     indexed = linear
