@@ -15,6 +15,11 @@ def V(mesh):
     return ufl.FunctionSpace(mesh, basix.ufl.element("P", "triangle", 1))
 
 
+@pytest.fixture(scope="module")
+def W(mesh):
+    return ufl.FunctionSpace(mesh, basix.ufl.element("P", "triangle", 1, shape=(2,)))
+
+
 @pytest.fixture(scope="session")
 def structural():
     """A non-SI unit system with GPa, metre and second as base units.

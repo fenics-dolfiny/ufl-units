@@ -210,3 +210,21 @@ def test_transform_dict(mesh, V):
 
     assert set(transformed) == {"mass", "stiffness"}
     assert all(isinstance(f, ufl.Form) for f in transformed.values())
+
+
+@pytest.mark.parametrize(
+    ("plain", "nabla"),
+    [(ufl.grad, ufl.nabla_grad), (ufl.div, ufl.nabla_div)],
+)
+def test_nabla_scaling(mesh, W, plain, nabla):
+    """The nabla spellings carry the reference length of the mesh, as grad and div do."""
+    u = ufl.Coefficient(W)
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+
+    dimsys = syu.si.SI.get_dimension_system()
+    mapping = {mesh: length}
+    plain_dim = get_dimension(ufl.inner(plain(u), plain(u)), [length], mapping=mapping)
+    nabla_dim = get_dimension(ufl.inner(nabla(u), nabla(u)), [length], mapping=mapping)
+
+    assert dimsys.equivalent_dims(plain_dim, 1 / syu.length**2)
+    assert dimsys.equivalent_dims(nabla_dim, plain_dim)
