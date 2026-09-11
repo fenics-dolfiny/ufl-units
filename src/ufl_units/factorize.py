@@ -1,6 +1,7 @@
 import fractions
 import logging
 import math
+from collections.abc import Sequence
 from typing import NamedTuple, overload
 
 from ufl.algorithms.map_integrands import map_integrands
@@ -33,7 +34,7 @@ class QuantityFactorizer(MultiFunction):
 
     factors: dict[Expr, np.ndarray]
 
-    def __init__(self, quantities: list[QuantityMixin], mode="factorize"):
+    def __init__(self, quantities: Sequence[QuantityMixin], mode="factorize"):
         self._quantities = quantities
 
         if mode not in ("factorize", "check"):
@@ -194,7 +195,7 @@ def _root_factor(factorizer: QuantityFactorizer, root_expr: Expr) -> np.ndarray 
 @overload
 def factorize(
     expr: dict,
-    quantities: list[QuantityMixin],
+    quantities: Sequence[QuantityMixin],
     mode: str = "factorize",
     mapping: dict | None = None,
 ) -> dict[str, FactorizedExpr]: ...
@@ -203,7 +204,7 @@ def factorize(
 @overload
 def factorize(
     expr: Expr | Form,
-    quantities: list[QuantityMixin],
+    quantities: Sequence[QuantityMixin],
     mode: str = "factorize",
     mapping: dict | None = None,
 ) -> FactorizedExpr: ...
@@ -211,7 +212,7 @@ def factorize(
 
 def factorize(
     expr: Expr | Form | dict,
-    quantities: list[QuantityMixin],
+    quantities: Sequence[QuantityMixin],
     mode: str = "factorize",
     mapping: dict | None = None,
 ) -> FactorizedExpr | dict[str, FactorizedExpr]:
@@ -284,7 +285,7 @@ def factorize(
     return FactorizedExpr(factorized_expression, root_factor)
 
 
-def expand(factor: np.ndarray | list, quantities: list) -> sy.Expr:
+def expand(factor: np.ndarray | Sequence, quantities: Sequence) -> sy.Expr:
     """Expand factor array into symbolic expression using quantities as base.
 
     Parameters
@@ -304,7 +305,7 @@ def expand(factor: np.ndarray | list, quantities: list) -> sy.Expr:
 
 
 def get_dimension(
-    expr: Expr | Form, quantities: list[QuantityMixin], mapping: dict | None = None
+    expr: Expr | Form, quantities: Sequence[QuantityMixin], mapping: dict | None = None
 ) -> sy.Expr:
     """Get the physical dimension of an expression.
 
@@ -334,7 +335,7 @@ def get_dimension(
 def normalize(
     expr_dict: dict[str, FactorizedExpr],
     reference_key: str,
-    quantities: list[QuantityMixin],
+    quantities: Sequence[QuantityMixin],
 ) -> dict[str, Expr | Form]:
     """Normalize expressions or forms with respect to a reference expression.
 

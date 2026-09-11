@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def dimension_matrix(
-    quantities: list[QuantityMixin],
+    quantities: Sequence[QuantityMixin],
     unit_system: UnitSystem = sy.physics.units.systems.SI,
 ) -> tuple[sy.Matrix, list[Dimension]]:
     """Build dimension matrix for Buckingham Pi analysis.
@@ -38,7 +39,7 @@ def dimension_matrix(
 
 
 def buckingham_pi_analysis(
-    quantities: list[QuantityMixin],
+    quantities: Sequence[QuantityMixin],
     unit_system: UnitSystem = sy.physics.units.systems.SI,
     outlier_threshold: float = 1e-16,
 ) -> tuple[sy.Matrix, list[Dimension], list[sy.Matrix]]:
