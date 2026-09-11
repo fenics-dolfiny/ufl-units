@@ -62,12 +62,16 @@ class Quantity(dolfinx.fem.Constant, ufl_units.QuantityMixin):
 
 This is what [`dolfiny`](https://dolfiny.uni.lu) does, see `dolfiny.units`.
 
-The dolfinx flavour above ships as `ufl_units.backends.dolfinx`, importable wherever dolfinx is
-installed:
+The dolfinx flavour above ships as `ufl_units.backends.dolfinx`, and the Firedrake one as
+`ufl_units.backends.firedrake`; each is importable wherever its backend is installed:
 
 ```python
-from ufl_units.backends.dolfinx import Quantity
+from ufl_units.backends.dolfinx import Quantity  # Quantity(mesh, scale, unit, symbol)
+from ufl_units.backends.firedrake import Quantity  # Quantity(scale, unit, symbol)
 ```
+
+A Firedrake constant is not tied to a mesh, so that flavour takes no domain; the measure it is
+integrated against carries the domain instead.
 
 # Development
 

@@ -8,7 +8,7 @@ ARG FIREDRAKE_TAG=latest
 FROM firedrakeproject/firedrake-vanilla-default:${FIREDRAKE_TAG}
 
 # --group needs pip >= 25.1, newer than the one in ubuntu:24.04
-RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir --upgrade --ignore-installed --break-system-packages pip setuptools
 
 # numpy and fenics-ufl come with Firedrake, sympy does not
 RUN pip install --no-cache-dir sympy

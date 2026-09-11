@@ -24,6 +24,8 @@ variables:
   PIP_DISABLE_PIP_VERSION_CHECK: 1
   DOLFINX_TAG: nightly
   DOLFINX_IMAGE: $CI_REGISTRY_IMAGE/dolfinx:$CI_COMMIT_REF_SLUG
+  FIREDRAKE_TAG: latest
+  FIREDRAKE_IMAGE: $CI_REGISTRY_IMAGE/firedrake:$CI_COMMIT_REF_SLUG
 
 # Publish the development image to the project registry, for `test-dolfinx` to run on.
 image-dolfinx:
@@ -37,6 +39,19 @@ image-dolfinx:
       docker build --pull --build-arg DOLFINX_TAG="$DOLFINX_TAG"
       -f docker/Dockerfile.dolfinx -t "$DOLFINX_IMAGE" .
     - docker push "$DOLFINX_IMAGE"
+
+# Publish the development image to the project registry, for `test-firedrake` to run on.
+image-firedrake:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - >-
+      docker build --pull --build-arg FIREDRAKE_TAG="$FIREDRAKE_TAG"
+      -f docker/Dockerfile.firedrake -t "$FIREDRAKE_IMAGE" .
+    - docker push "$FIREDRAKE_IMAGE"
 
 ruff:
   stage: lint
@@ -106,6 +121,25 @@ test-dolfinx:
     - pip install --group test
     - pip install --no-deps --no-build-isolation .
     - python -m pytest -n auto test/
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_JOB_NAME-$CI_COMMIT_REF_SLUG-artifacts"
+    paths:
+      - "report.xml"
+    reports:
+      junit: report.xml
+    expire_in: 2 hours
+
+test-firedrake:
+  stage: test
+  image: $FIREDRAKE_IMAGE
+  needs:
+    - image-firedrake
+  script:
+    # As in the devcontainer, ufl-units goes in with --no-deps so that the image's own
+    # fenics-ufl, fenics-basix and numpy stay in place.
+    - pip install --group test
+    - pip install --no-deps --no-build-isolation .
+    - python3 -m pytest -n auto test/
   artifacts:
     name: "$CI_PROJECT_NAME-$CI_JOB_NAME-$CI_COMMIT_REF_SLUG-artifacts"
     paths:
