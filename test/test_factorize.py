@@ -169,7 +169,7 @@ def test_invalid_type(mesh):
     length = Quantity(mesh, 1.0, syu.meter, "L")
 
     with pytest.raises(TypeError, match="Unsupported type for factorization"):
-        factorize("not an expression", [length])
+        factorize("not an expression", [length])  # ty: ignore[no-matching-overload]
 
 
 def test_form_inconsistent_integral_dimensions(mesh, V):

@@ -12,10 +12,8 @@ from ufl_units.quantity import QuantityMixin
 
 logger = logging.getLogger(__name__)
 
-# Geometric quantities that carry no length: quantities of the reference cell, facet or
-# ridge, the reference-to-reference Jacobians between them, unit normals, orientations
-# and quadrature weights. Everything else is either scaled by a handler below or
-# rejected by `UnitTransformer.geometric_quantity`.
+# Geometric quantities that carry no length: reference cell, facet and ridge quantities,
+# the Jacobians between them, unit normals, orientations and quadrature weights.
 _DIMENSIONLESS_GEOMETRY = (
     ufl_geometry.CellCoordinate,
     ufl_geometry.FacetCoordinate,
@@ -83,12 +81,7 @@ class UnitTransformer(MultiFunction):
         return o * (self._mesh_scale ** (tdim - 1))
 
     def geometric_quantity(self, o, *ops):
-        """Reject geometric quantities that have no scaling rule.
-
-        Reached only by quantities without a handler of their own. Those listed in
-        `_DIMENSIONLESS_GEOMETRY` pass through untouched. Anything else carries a length
-        and would silently yield a wrong dimension, so it is rejected instead.
-        """
+        """Reject geometric quantities that have no scaling rule, rather than assume one."""
         if isinstance(o, _DIMENSIONLESS_GEOMETRY):
             return self.reuse_if_untouched(o, *ops)
 
@@ -100,8 +93,7 @@ class UnitTransformer(MultiFunction):
     div = grad
     curl = grad
 
-    # All handler names below scale like a single length. Note that UFL dispatches these
-    # as min/max_cell_edge_length and min/max_facet_edge_length, not as min/max_edge_length.
+    # Scale like a single length. Note the handler names UFL dispatches these to.
     circumradius = spatial_coordinate
     cell_diameter = spatial_coordinate
     min_cell_edge_length = spatial_coordinate
@@ -163,10 +155,8 @@ def transform(expr: Expr | Form | dict, mapping: dict):
 def collect_quantities(expr, mapping: dict | None = None) -> list[QuantityMixin]:
     """Collect all Quantity instances from a UFL expression.
 
-    The quantities are returned in the order they were constructed in. Since the
-    position of a quantity in this list fixes its column of the dimension matrix, and
-    hence the basis of dimensionless groups that is reported, the order has to be
-    reproducible rather than that of the set the quantities are gathered in.
+    Returned in construction order: a quantity's position fixes its column of the
+    dimension matrix, so the order has to be reproducible.
     """
     if mapping is not None:
         expr = transform(expr, mapping)
@@ -175,12 +165,10 @@ def collect_quantities(expr, mapping: dict | None = None) -> list[QuantityMixin]
 
     class QuantityCollector(MultiFunction):
         def ufl_type(self, o, *args):
-            return self.reuse_if_untouched(o, *args)
-
-        def constant(self, o, *ops):
+            # By mixin type, not handler name, so any backend's terminal is collected
             if isinstance(o, QuantityMixin):
                 quantities.add(o)
-            return self.reuse_if_untouched(o, *ops)
+            return self.reuse_if_untouched(o, *args)
 
     if isinstance(expr, Form):
         for integral in expr.integrals():

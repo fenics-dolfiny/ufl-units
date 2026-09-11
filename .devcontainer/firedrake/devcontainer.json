@@ -1,0 +1,50 @@
+{
+  "name": "ufl-units (firedrake)",
+  "build": {
+    "dockerfile": "../../docker/Dockerfile.firedrake",
+    "context": "../..",
+    "options": ["--progress", "plain", "--pull"]
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2.5.9": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "charliermarsh.ruff",
+        "esbenp.prettier-vscode",
+        "gitlab.gitlab-workflow",
+        "ms-python.mypy-type-checker",
+        "tamasfe.even-better-toml",
+        "anthropic.claude-code"
+      ],
+      "settings": {
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+          }
+        },
+        "[json]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode",
+          "editor.formatOnSave": true
+        },
+        "[jsonc]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode",
+          "editor.formatOnSave": true
+        },
+        "[markdown]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode",
+          "editor.formatOnSave": true
+        },
+        "ruff.nativeServer": true,
+        "mypy-type-checker.preferDaemon": true,
+        "mypy-type-checker.reportingScope": "workspace",
+        "python.analysis.extraPaths": ["test"]
+      }
+    }
+  },
+  "postCreateCommand": "pip install --group lint --group test && pip install --no-deps --no-build-isolation --editable ."
+}

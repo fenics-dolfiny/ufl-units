@@ -17,9 +17,9 @@ def V(mesh):
 
 @pytest.fixture(scope="session")
 def structural():
-    """A non-SI unit system with GPa, metre and second as its base units.
+    """A non-SI unit system with GPa, metre and second as base units.
 
-    Registering a unit mutates sympy's global scale factors, hence session scope.
+    Session scope: registering a unit mutates sympy's global scale factors.
     """
     GPa = syu.Quantity("gigapascal", abbrev="GPa")
     GPa.set_global_dimension(syu.pressure)
