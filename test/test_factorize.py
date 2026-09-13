@@ -7,6 +7,7 @@ from ufl_units import (
     FactorizedExpr,
     Quantity,
     QuantityFactorizer,
+    collect_quantities,
     expand,
     factorize,
     get_dimension,
@@ -195,6 +196,70 @@ def test_form_inconsistent_integral_factors(mesh, V):
 
     with pytest.raises(RuntimeError, match="Inconsistent factors across integrals"):
         factorize(form, [l_one, l_two], mode="factorize")
+
+
+def test_interpolate_is_linear(mesh, V):
+    """Interpolation keeps the dimension of what is interpolated, and factorizes through."""
+    u = ufl.Coefficient(V)
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+
+    dimsys = syu.si.SI.get_dimension_system()
+    assert dimsys.equivalent_dims(
+        get_dimension(ufl.Interpolate(length * u, V), [length]), syu.length
+    )
+
+    dimensionless, factor = factorize(ufl.Interpolate(length * u, V), [length])
+    assert factor == pytest.approx([1.0])
+    assert collect_quantities(dimensionless) == []
+
+
+def test_interpolate_of_dimensional_expression(mesh, V):
+    """The dual argument of an Interpolate is an argument slot, and constrains nothing."""
+    u = ufl.Coefficient(V)
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    time = Quantity(mesh, 1.0, syu.second, "T")
+
+    dimsys = syu.si.SI.get_dimension_system()
+    dim = get_dimension(ufl.Interpolate(length / time * u, V), [length, time])
+    assert dimsys.equivalent_dims(dim, syu.length / syu.time)
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda V: ufl.Cofunction(V.dual()),
+        lambda V: ufl.Matrix(V, V),
+        lambda V: ufl.ZeroBaseForm(()),
+    ],
+)
+def test_base_form_terminal_is_dimensionless(mesh, V, build):
+    """A dual object holds no operands, so nothing can be pulled out of it."""
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+
+    factorized = factorize(build(V), [length])
+    assert factorized.factor == pytest.approx([0.0])
+
+
+def test_form_sum_weight_is_factorized(mesh, V):
+    """A quantity scaling a dual object sits in a weight, and is pulled out of it."""
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    cofunction = ufl.Cofunction(V.dual())
+
+    dimensionless, factor = factorize(length * cofunction, [length])
+
+    assert factor == pytest.approx([1.0])
+    assert collect_quantities(dimensionless) == []
+
+
+def test_form_sum_inconsistent_components(mesh, V):
+    """The components of a sum of base forms must agree dimensionally, as integrals do."""
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    time = Quantity(mesh, 1.0, syu.second, "T")
+    cofunction = ufl.Cofunction(V.dual())
+
+    form_sum = ufl.FormSum((cofunction, length), (ufl.Cofunction(V.dual()), time))
+    with pytest.raises(RuntimeError, match="Inconsistent dimensions across components of FormSum"):
+        factorize(form_sum, [length, time], mode="check")
 
 
 def test_normalize_none_factor(mesh):

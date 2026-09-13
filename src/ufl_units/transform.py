@@ -2,19 +2,27 @@ import logging
 
 import ufl
 import ufl.geometry as ufl_geometry
+from ufl.argument import Coargument
+from ufl.coefficient import Cofunction
 from ufl.core.expr import Expr
 from ufl.corealg.map_dag import map_expr_dag
 from ufl.corealg.multifunction import MultiFunction
 from ufl.domain import extract_unique_domain
-from ufl.form import Form
+from ufl.form import BaseForm, Form, FormSum, ZeroBaseForm
+from ufl.matrix import Matrix
+from ufl.measure import point_integral_types
 
 from ufl_units.quantity import QuantityMixin
 
 logger = logging.getLogger(__name__)
 
+# Dual and operator-valued forms that are not UFL expressions and hold no operands to
+# descend into. A mapping may replace one.
+_base_form_terminals = (Cofunction, Coargument, Matrix, ZeroBaseForm)
+
 # Geometric quantities that carry no length: reference cell, facet and ridge quantities,
 # the Jacobians between them, unit normals, orientations and quadrature weights.
-_DIMENSIONLESS_GEOMETRY = (
+_dimensionless_geometry = (
     ufl_geometry.CellCoordinate,
     ufl_geometry.FacetCoordinate,
     ufl_geometry.RidgeCoordinate,
@@ -71,6 +79,9 @@ class UnitTransformer(MultiFunction):
     def spatial_coordinate(self, o, *ops):
         return o * self._mesh_scale
 
+    def jacobian_inverse(self, o, *ops):
+        return o / self._mesh_scale
+
     def cell_volume(self, o, *ops):
         # Note that topological_dimension is a property, not a method
         tdim = extract_unique_domain(o).topological_dimension
@@ -80,14 +91,18 @@ class UnitTransformer(MultiFunction):
         tdim = extract_unique_domain(o).topological_dimension
         return o * (self._mesh_scale ** (tdim - 1))
 
+    def ridge_jacobian_determinant(self, o, *ops):
+        tdim = extract_unique_domain(o).topological_dimension
+        return o * (self._mesh_scale ** (tdim - 2))
+
     def geometric_quantity(self, o, *ops):
         """Reject geometric quantities that have no scaling rule, rather than assume one."""
-        if isinstance(o, _DIMENSIONLESS_GEOMETRY):
+        if isinstance(o, _dimensionless_geometry):
             return self.reuse_if_untouched(o, *ops)
 
         raise NotImplementedError(
             f"{type(o).__name__} has no unit scaling rule. Add a handler to "
-            "UnitTransformer, or list it in _DIMENSIONLESS_GEOMETRY if it carries no unit."
+            "UnitTransformer, or list it in _dimensionless_geometry if it carries no unit."
         )
 
     div = grad
@@ -102,6 +117,56 @@ class UnitTransformer(MultiFunction):
     max_cell_edge_length = spatial_coordinate
     min_facet_edge_length = spatial_coordinate
     max_facet_edge_length = spatial_coordinate
+    cell_origin = spatial_coordinate
+    facet_origin = spatial_coordinate
+    ridge_origin = spatial_coordinate
+    cell_vertices = spatial_coordinate
+    cell_edge_vectors = spatial_coordinate
+    facet_edge_vectors = spatial_coordinate
+    # A Jacobian differentiates spatial coordinates with respect to reference ones, which
+    # are dimensionless, so it too carries exactly one length.
+    jacobian = spatial_coordinate
+    facet_jacobian = spatial_coordinate
+    ridge_jacobian = spatial_coordinate
+
+    # The (pseudo-)inverses undo one length.
+    facet_jacobian_inverse = jacobian_inverse
+    ridge_jacobian_inverse = jacobian_inverse
+
+    # A (pseudo-)determinant scales like the volume of the entity its Jacobian maps onto:
+    # the cell (tdim), a facet (tdim - 1) or a ridge (tdim - 2).
+    jacobian_determinant = cell_volume
+    facet_jacobian_determinant = facet_area
+
+
+# Codimension of the domain each UFL integral type integrates over, relative to the cell.
+# The measure then scales as ``mesh_scale ** (tdim - codim)``.
+_integral_type_codim = {
+    "cell": 0,
+    "exterior_facet": 1,
+    "interior_facet": 1,
+    "ridge": 2,
+    # Extruded meshes: horizontal and vertical facets are facets like any other.
+    "exterior_facet_bottom": 1,
+    "exterior_facet_top": 1,
+    "exterior_facet_vert": 1,
+    "interior_facet_horiz": 1,
+    "interior_facet_vert": 1,
+}
+
+
+def _measure_dim(integral_type: str, tdim: int) -> int:
+    """Dimension of the domain an integral type integrates over, on a cell of dim ``tdim``."""
+    if integral_type in point_integral_types:
+        return 0
+
+    if integral_type not in _integral_type_codim:
+        raise NotImplementedError(
+            f"Integral type '{integral_type}' has no measure scaling rule. "
+            "Add its codimension to _integral_type_codim."
+        )
+
+    return tdim - _integral_type_codim[integral_type]
 
 
 def _transform_expr(expr: Expr, mapping: dict):
@@ -110,8 +175,6 @@ def _transform_expr(expr: Expr, mapping: dict):
 
 
 def _transform_form(form: Form, mapping: dict) -> Form:
-    _integral_type_codim = {"cell": 0, "interior_facet": 1, "exterior_facet": 1}
-
     transformer = UnitTransformer(mapping)
     transformed_integrals = []
 
@@ -121,7 +184,7 @@ def _transform_form(form: Form, mapping: dict) -> Form:
 
         # Scale by measure change
         tdim = integral.ufl_domain().topological_dimension
-        measure_dim = tdim - _integral_type_codim[integral.integral_type()]
+        measure_dim = _measure_dim(integral.integral_type(), tdim)
         scaled_integrand = transformed_integrand * (transformer._mesh_scale**measure_dim)
 
         transformed_integrals.append(integral.reconstruct(scaled_integrand))
@@ -129,7 +192,22 @@ def _transform_form(form: Form, mapping: dict) -> Form:
     return Form(transformed_integrals)
 
 
-def transform(expr: Expr | Form | dict, mapping: dict):
+def _transform_form_sum(form_sum: FormSum, mapping: dict) -> FormSum:
+    """Transform each term of a sum of base forms, weights included.
+
+    Scaling a dual object by a quantity produces a :class:`ufl.form.FormSum` carrying the
+    quantity as a *weight*, outside the expression DAG, so the weights have to be
+    transformed alongside the components.
+    """
+    components = [transform(component, mapping) for component in form_sum.components()]
+    weights = [
+        transform(weight, mapping) if isinstance(weight, Expr) else weight
+        for weight in form_sum.weights()
+    ]
+    return FormSum(*zip(components, weights))
+
+
+def transform(expr: Expr | BaseForm | dict, mapping: dict):
     """Transform expressions or forms by applying unit mapping and mesh scaling.
 
     Parameters
@@ -148,8 +226,14 @@ def transform(expr: Expr | Form | dict, mapping: dict):
         return {key: transform(value, mapping) for key, value in expr.items()}
     if isinstance(expr, Form):
         return _transform_form(expr, mapping)
+    if isinstance(expr, FormSum):
+        return _transform_form_sum(expr, mapping)
+    # A BaseFormOperator such as `ufl.Interpolate` is both a BaseForm and an Expr, and it
+    # belongs here: its operands are an expression DAG to descend into.
     if isinstance(expr, Expr):
         return _transform_expr(expr, mapping)
+    if isinstance(expr, _base_form_terminals):
+        return mapping.get(expr, expr)
 
     raise TypeError(f"Unsupported type for unit transformation: {type(expr).__name__}")
 
@@ -163,7 +247,7 @@ def collect_quantities(expr, mapping: dict | None = None) -> list[QuantityMixin]
     if mapping is not None:
         expr = transform(expr, mapping)
 
-    quantities = set()
+    quantities: set[QuantityMixin] = set()
 
     class QuantityCollector(MultiFunction):
         def ufl_type(self, o, *args):
@@ -172,12 +256,22 @@ def collect_quantities(expr, mapping: dict | None = None) -> list[QuantityMixin]
                 quantities.add(o)
             return self.reuse_if_untouched(o, *args)
 
-    if isinstance(expr, Form):
-        for integral in expr.integrals():
-            map_expr_dag(QuantityCollector(), integral.integrand())
-    elif isinstance(expr, Expr):
-        map_expr_dag(QuantityCollector(), expr)
-    else:
-        raise TypeError(f"Unsupported type for collecting quantities: {type(expr).__name__}")
+    def collect(expr) -> None:
+        if isinstance(expr, Form):
+            for integral in expr.integrals():
+                map_expr_dag(QuantityCollector(), integral.integrand())
+        elif isinstance(expr, FormSum):
+            for component, weight in zip(expr.components(), expr.weights()):
+                collect(component)
+                if isinstance(weight, Expr):
+                    collect(weight)
+        elif isinstance(expr, Expr):
+            map_expr_dag(QuantityCollector(), expr)
+        elif isinstance(expr, _base_form_terminals):
+            pass  # Holds no operands; a quantity can only reach it through the mapping.
+        else:
+            raise TypeError(f"Unsupported type for collecting quantities: {type(expr).__name__}")
+
+    collect(expr)
 
     return sorted(quantities, key=lambda q: q.count())

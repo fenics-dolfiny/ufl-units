@@ -1,9 +1,25 @@
+import basix.ufl
 import ufl
+from ufl.measure import point_integral_types
 
 import pytest
 import sympy as sy
 import sympy.physics.units as syu
-from ufl_units import Quantity, collect_quantities, factorize, get_dimension, transform
+from ufl_units import (
+    Quantity,
+    UnitTransformer,
+    collect_quantities,
+    factorize,
+    get_dimension,
+    transform,
+)
+from ufl_units.transform import _dimensionless_geometry, _integral_type_codim, _measure_dim
+
+
+@pytest.fixture(scope="module")
+def mesh_3d():
+    """A tetrahedral mesh, for the quantities whose scaling depends on `tdim`."""
+    return ufl.Mesh(basix.ufl.element("P", "tetrahedron", 1, shape=(3,)))
 
 
 def test_collect(mesh, V):
@@ -104,63 +120,100 @@ def test_spatial_coordinate(mesh):
     assert syu.si.SI.get_dimension_system().equivalent_dims(dim, syu.length)
 
 
+def _geometry_exponent(mesh, quantity):
+    """Length exponent `quantity` picks up when transformed on `mesh`."""
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    return factorize(quantity(mesh), [length], mapping={mesh: length}).factor[0]
+
+
 @pytest.mark.parametrize(
     "quantity",
     [
+        # Measures of cell or facet size
         ufl.Circumradius,
         ufl.CellDiameter,
         ufl.MinCellEdgeLength,
         ufl.MaxCellEdgeLength,
         ufl.MinFacetEdgeLength,
         ufl.MaxFacetEdgeLength,
+        # Physical coordinates, and differences of them
+        ufl.SpatialCoordinate,
+        ufl.geometry.CellOrigin,
+        ufl.geometry.FacetOrigin,
+        ufl.geometry.RidgeOrigin,
+        ufl.geometry.CellVertices,
+        ufl.geometry.CellEdgeVectors,
+        ufl.geometry.FacetEdgeVectors,
+        # Jacobians, against dimensionless reference coordinates
+        ufl.geometry.Jacobian,
+        ufl.geometry.FacetJacobian,
+        ufl.geometry.RidgeJacobian,
     ],
+    ids=lambda cls: cls.__name__,
 )
-def test_length_quantities(mesh, quantity):
-    """Every measure of cell or facet size scales like a single length."""
-    length = Quantity(mesh, 1.0, syu.meter, "L")
-
-    dim = get_dimension(quantity(mesh), [length], mapping={mesh: length})
-    assert syu.si.SI.get_dimension_system().equivalent_dims(dim, syu.length)
+def test_length_quantities(mesh_3d, quantity):
+    """Everything built from a physical coordinate scales like a single length."""
+    assert _geometry_exponent(mesh_3d, quantity) == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize(
-    "quantity", [ufl.FacetNormal, ufl.geometry.QuadratureWeight, ufl.geometry.CellOrientation]
+    "quantity",
+    [
+        ufl.geometry.JacobianInverse,
+        ufl.geometry.FacetJacobianInverse,
+        ufl.geometry.RidgeJacobianInverse,
+    ],
+    ids=lambda cls: cls.__name__,
 )
-def test_dimensionless_geometry_passes_through(mesh, quantity):
-    """Reference-domain quantities, normals and orientations carry no length."""
-    length = Quantity(mesh, 1.0, syu.meter, "L")
+def test_inverse_length_quantities(mesh_3d, quantity):
+    """The (pseudo-)inverse of a Jacobian undoes its length."""
+    assert _geometry_exponent(mesh_3d, quantity) == pytest.approx(-1.0)
 
-    transformed = transform(quantity(mesh) * length, {mesh: length})
-    assert transformed is not None
+
+@pytest.mark.parametrize("quantity", _dimensionless_geometry, ids=lambda cls: cls.__name__)
+def test_dimensionless_geometry_passes_through(mesh_3d, quantity):
+    """Everything listed as dimensionless really does come through unscaled."""
+    assert _geometry_exponent(mesh_3d, quantity) == pytest.approx(0.0)
 
 
 @pytest.mark.parametrize(
-    "quantity", [ufl.geometry.Jacobian, ufl.geometry.JacobianDeterminant, ufl.geometry.CellVertices]
+    ("quantity", "exponent"),
+    [
+        # tdim == 3, so the cell, facet and ridge exponents are distinct
+        (ufl.CellVolume, 3),
+        (ufl.geometry.JacobianDeterminant, 3),
+        (ufl.FacetArea, 2),
+        (ufl.geometry.FacetJacobianDeterminant, 2),
+        (ufl.geometry.RidgeJacobianDeterminant, 1),
+    ],
+    ids=lambda arg: arg.__name__ if isinstance(arg, type) else str(arg),
 )
-def test_unhandled_geometry_raises(mesh, quantity):
-    """A dimensional quantity without a rule is rejected, not silently left unscaled."""
+def test_volume_quantities(mesh_3d, quantity, exponent):
+    """A volume, and the (pseudo-)determinant mapping onto it, scale with its dimension."""
+    assert _geometry_exponent(mesh_3d, quantity) == pytest.approx(exponent)
+
+
+def test_every_geometric_quantity_has_a_rule(mesh_3d):
+    """No geometric quantity UFL ships falls through to the NotImplementedError."""
+    length = Quantity(mesh_3d, 1.0, syu.meter, "L")
+
+    for cls in vars(ufl.geometry).values():
+        if isinstance(cls, type) and issubclass(cls, ufl.geometry.GeometricQuantity):
+            if not cls._ufl_is_abstract_:
+                transform(cls(mesh_3d), {mesh_3d: length})
+
+
+def test_unhandled_geometry_raises(mesh):
+    """A dimensional quantity without a rule is rejected, not silently left unscaled.
+
+    Every quantity UFL ships now has one, so the fallback is reached directly, standing in
+    for a geometric quantity a future UFL adds.
+    """
     length = Quantity(mesh, 1.0, syu.meter, "L")
+    transformer = UnitTransformer({mesh: length})
 
     with pytest.raises(NotImplementedError, match="no unit scaling rule"):
-        transform(quantity(mesh), {mesh: length})
-
-
-def test_cell_volume(mesh):
-    """A cell volume scales with the topological dimension of the mesh."""
-    length = Quantity(mesh, 1.0, syu.meter, "L")
-
-    factorized = factorize(ufl.CellVolume(mesh), [length], mapping={mesh: length})
-    assert factorized.factor is not None
-    assert factorized.factor[0] == pytest.approx(2.0)  # triangle, tdim == 2
-
-
-def test_facet_area(mesh):
-    """A facet area scales one dimension lower than a cell volume."""
-    length = Quantity(mesh, 1.0, syu.meter, "L")
-
-    factorized = factorize(ufl.FacetArea(mesh), [length], mapping={mesh: length})
-    assert factorized.factor is not None
-    assert factorized.factor[0] == pytest.approx(1.0)  # triangle facet, tdim - 1 == 1
+        transformer.geometric_quantity(ufl.SpatialCoordinate(mesh))
 
 
 def test_div(mesh, V):
@@ -193,11 +246,88 @@ def test_interior_facet_measure(mesh, V):
     assert factorized.factor[0] == pytest.approx(1.0)
 
 
+_supported_integral_types = sorted(_integral_type_codim) + list(point_integral_types)
+_unsupported_integral_types = sorted(
+    set(ufl.measure.integral_type_to_measure_name) - set(_supported_integral_types)
+)
+
+
+def _measure_exponent(mesh, integral_type):
+    """Length exponent the measure of `integral_type` contributes on `mesh`."""
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    form = ufl.Constant(mesh) * ufl.Measure(integral_type, domain=mesh)
+    return factorize(form, [length], mapping={mesh: length}).factor[0]
+
+
+@pytest.mark.parametrize("integral_type", _supported_integral_types)
+def test_measure_scaling_by_integral_type(mesh_3d, integral_type):
+    """Each measure carries the length of the domain it integrates over."""
+    assert _measure_exponent(mesh_3d, integral_type) == pytest.approx(
+        _measure_dim(integral_type, tdim=3)
+    )
+
+
+@pytest.mark.parametrize("integral_type", _unsupported_integral_types)
+def test_unsupported_integral_type_raises(mesh_3d, integral_type):
+    """An integral type with no codimension is rejected, not silently taken as a cell."""
+    length = Quantity(mesh_3d, 1.0, syu.meter, "L")
+    form = ufl.Constant(mesh_3d) * ufl.Measure(integral_type, domain=mesh_3d)
+
+    with pytest.raises(NotImplementedError, match="no measure scaling rule"):
+        transform(form, {mesh_3d: length})
+
+
 def test_transform_invalid_type(mesh):
     """Only expressions, forms and dictionaries of those can be transformed."""
     length = Quantity(mesh, 1.0, syu.meter, "L")
     with pytest.raises(TypeError, match="Unsupported type for unit transformation"):
         transform("not an expression", {mesh: length})
+
+
+def test_transform_interpolate(mesh, V):
+    """An Interpolate is a BaseForm and an Expr, and is descended into as the latter."""
+    u = ufl.Coefficient(V)
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    u_ref = Quantity(mesh, 2.0, syu.kelvin, "u_ref")
+
+    transformed = transform(ufl.Interpolate(u, V), {mesh: length, u: u_ref * u})
+
+    assert isinstance(transformed, ufl.Interpolate)
+    assert set(collect_quantities(transformed)) == {u_ref}
+
+
+@pytest.mark.parametrize("build", [lambda V: ufl.Cofunction(V.dual()), lambda V: ufl.Matrix(V, V)])
+def test_transform_base_form_terminal(mesh, V, build):
+    """A dual object holds no operands: a mapping replaces it whole, or it passes through."""
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    terminal = build(V)
+
+    assert transform(terminal, {mesh: length}) is terminal
+    assert transform(terminal, {mesh: length, terminal: length * terminal}) is not terminal
+
+
+def test_transform_form_sum(mesh, V):
+    """Both the components of a sum of base forms and its weights are transformed."""
+    u = ufl.Coefficient(V)
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    u_ref = Quantity(mesh, 2.0, syu.kelvin, "u_ref")
+
+    form_sum = ufl.FormSum((ufl.Interpolate(u, V), 1.0), (ufl.Cofunction(V.dual()), 1.0))
+    transformed = transform(form_sum, {mesh: length, u: u_ref * u})
+
+    assert isinstance(transformed, ufl.FormSum)
+    assert set(collect_quantities(transformed)) == {u_ref}
+
+
+def test_collect_form_sum_weights(mesh, V):
+    """Scaling a dual object parks the quantity in a weight, outside the expression DAG."""
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    cofunction = ufl.Cofunction(V.dual())
+
+    scaled = length * cofunction
+    assert isinstance(scaled, ufl.FormSum)
+    assert scaled.weights() == [length]
+    assert collect_quantities(scaled) == [length]
 
 
 def test_transform_dict(mesh, V):

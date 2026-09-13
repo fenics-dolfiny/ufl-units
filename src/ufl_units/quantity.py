@@ -36,6 +36,8 @@ class QuantityMixin:
         @property
         def ufl_shape(self) -> tuple[int, ...]: ...
 
+        def count(self) -> int: ...
+
     def _init_units(
         self,
         scale: float | int,

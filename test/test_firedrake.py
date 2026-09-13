@@ -84,6 +84,44 @@ def test_factorize_form(flux):
     assert scale * assemble(dimensionless) == pytest.approx(assemble(transform(form, mapping)))
 
 
+def test_factorize_interpolate(unit_square):
+    """An Interpolate keeps the dimension of what it interpolates, through assembly."""
+    V = firedrake.FunctionSpace(unit_square, "Lagrange", 1)
+    W = firedrake.FunctionSpace(unit_square, "Lagrange", 2)
+    x = ufl.SpatialCoordinate(unit_square)
+    temperature = firedrake.Function(V).interpolate(1.0 + x[0] ** 2)
+
+    T_ref = Quantity(300.0, syu.kelvin, "T_ref")
+    interpolated = firedrake.Interpolate(T_ref * temperature, W)
+
+    dimensionless, factor = factorize(interpolated, [T_ref])
+    assert factor == pytest.approx([1.0])
+    assert collect_quantities(dimensionless) == []
+
+    scale = float(expand(factor, [T_ref.factor]))
+    remainder = firedrake.assemble(dimensionless).dat.data_ro
+    assert scale * remainder == pytest.approx(firedrake.assemble(interpolated).dat.data_ro)
+
+
+@pytest.mark.parametrize(
+    ("measure", "exponent"),
+    [("dx", 2.0), ("ds_b", 1.0), ("ds_t", 1.0), ("ds_v", 1.0), ("dS_h", 1.0), ("dS_v", 1.0)],
+)
+def test_extruded_measure_scaling(measure, exponent):
+    """The measures an extruded mesh adds scale like the facets they integrate over."""
+    extruded = firedrake.ExtrudedMesh(firedrake.UnitIntervalMesh(4), 3, layer_height=1 / 3)
+    length = Quantity(2.0, syu.meter, "L")
+
+    V = firedrake.FunctionSpace(extruded, "Lagrange", 1)
+    u = firedrake.Function(V).interpolate(firedrake.Constant(1.0))
+
+    integrand = ufl.avg(u) if measure.startswith("dS") else u
+    form = integrand * ufl.Measure(measure, domain=extruded)
+
+    factorized = factorize(form, [length], mapping={extruded: length})
+    assert factorized.factor[0] == pytest.approx(exponent)
+
+
 def test_factorize_after_scale_change(flux):
     """A scale change moves into the factor and leaves the dimensionless form alone."""
     form, mapping, (kappa, _, _) = flux
