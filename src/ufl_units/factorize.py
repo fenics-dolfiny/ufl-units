@@ -1,4 +1,5 @@
 import fractions
+import itertools
 import logging
 import math
 from collections.abc import Sequence
@@ -9,19 +10,19 @@ from ufl.constantvalue import Zero, as_ufl
 from ufl.core.expr import Expr
 from ufl.corealg.map_dag import map_expr_dag
 from ufl.corealg.multifunction import MultiFunction
-from ufl.form import Form
+from ufl.form import BaseForm, Form, FormSum
 
 import numpy as np
 import sympy as sy
 from ufl_units.quantity import QuantityMixin, to_base_units
 from ufl_units.table import print_table
-from ufl_units.transform import transform
+from ufl_units.transform import _base_form_terminals, transform
 
 logger = logging.getLogger(__name__)
 
 
 class FactorizedExpr(NamedTuple):
-    expr: Expr | Form
+    expr: Expr | BaseForm
     factor: np.ndarray | None
 
 
@@ -239,6 +240,8 @@ class QuantityFactorizer(MultiFunction):
     cross = product
     outer = product
 
+    interpolate = linear
+
     expr = inhomogeneous
 
 
@@ -249,6 +252,44 @@ def _root_factor(factorizer: QuantityFactorizer, root_expr: Expr) -> np.ndarray 
 
     fallback_root_expr = next(reversed(factorizer.factors), None)
     return factorizer.factors[fallback_root_expr] if fallback_root_expr is not None else None
+
+
+def _check_consistent_factors(
+    factors: Sequence[np.ndarray | None],
+    quantities: Sequence[QuantityMixin],
+    mode: str,
+    context: str,
+) -> None:
+    """Check that the terms of a form all carry the same dimension, and the same factor.
+
+    ``context`` names the kind of term being compared, for the error message: the
+    integrals of a Form, or the components of a FormSum.
+    """
+    if not quantities:
+        return  # Nothing was factorized out, so every term trivially agrees.
+
+    dimsys = quantities[0].unit_system.get_dimension_system()
+
+    for fa, fb in itertools.pairwise(factors):
+        if fa is None or fb is None:
+            continue
+
+        fa_expr = expand(fa, [q.dimension for q in quantities]).simplify()
+        fb_expr = expand(fb, [q.dimension for q in quantities]).simplify()
+        fa_symbol = expand(fa, [q.symbol for q in quantities])
+        fb_symbol = expand(fb, [q.symbol for q in quantities])
+
+        if dimsys.equivalent_dims(fa_expr, fb_expr) is False:
+            raise RuntimeError(
+                f"Inconsistent dimensions across {context}. \n"
+                f"Scales: {fa_symbol} != {fb_symbol}. \n"
+                f"{fa_expr} != {fb_expr}."
+            )
+
+        if mode == "factorize" and not np.allclose(fa, fb):
+            raise RuntimeError(
+                f"Inconsistent factors across {context}. \n{fa_symbol} != {fb_symbol}."
+            )
 
 
 @overload
@@ -262,7 +303,7 @@ def factorize(
 
 @overload
 def factorize(
-    expr: Expr | Form,
+    expr: Expr | BaseForm,
     quantities: Sequence[QuantityMixin],
     mode: str = "factorize",
     mapping: dict | None = None,
@@ -270,7 +311,7 @@ def factorize(
 
 
 def factorize(
-    expr: Expr | Form | dict,
+    expr: Expr | BaseForm | dict,
     quantities: Sequence[QuantityMixin],
     mode: str = "factorize",
     mapping: dict | None = None,
@@ -301,9 +342,11 @@ def factorize(
         return {key: factorize(value, quantities, mode=mode) for key, value in expr.items()}
     if mode not in ("factorize", "check"):
         raise RuntimeError(f"{mode} is not a valid factorisation mode.")
+    factorized_expression: Expr | BaseForm
+
     if isinstance(expr, Form):
         factorized_integrals = []
-        factors = []
+        factors: list[np.ndarray | None] = []
         for integral in expr.integrals():
             factorizer = QuantityFactorizer(quantities, mode=mode)
             integrand = integral.integrand()
@@ -311,37 +354,60 @@ def factorize(
             factorized_integrals.append(integral.reconstruct(factorized_integrand))
             factors.append(_root_factor(factorizer, integrand))
 
-        for i in range(len(factors) - 1):
-            unit_system = quantities[0].unit_system
-            dimsys = unit_system.get_dimension_system()
-            fa_expr = expand(factors[i], [q.dimension for q in quantities]).simplify()  # type: ignore[arg-type]
-            fb_expr = expand(factors[i + 1], [q.dimension for q in quantities]).simplify()  # type: ignore[arg-type]
-            fa_symbol = expand(factors[i], [q.symbol for q in quantities])  # type: ignore[arg-type]
-            fb_symbol = expand(factors[i + 1], [q.symbol for q in quantities])  # type: ignore[arg-type]
-            if dimsys.equivalent_dims(fa_expr, fb_expr) is False:
-                raise RuntimeError(
-                    "Inconsistent dimensions across integrals in Form. \n"
-                    f"Scales: {fa_symbol} != {fb_symbol}. \n"
-                    f"{fa_expr} != {fb_expr}."
-                )
-
-            if mode == "factorize":
-                if not np.allclose(factors[i], factors[i + 1]):  # type: ignore[arg-type]
-                    raise RuntimeError(
-                        "Inconsistent factors across integrals in Form. \n"
-                        f"{fa_symbol} != {fb_symbol}."
-                    )
+        _check_consistent_factors(factors, quantities, mode, "integrals in Form")
 
         factorized_expression = Form(factorized_integrals)
         root_factor = factors[0] if factors else None
+    elif isinstance(expr, FormSum):
+        factorized_expression, root_factor = _factorize_form_sum(expr, quantities, mode)
+    # A BaseFormOperator such as `ufl.Interpolate` is both a BaseForm and an Expr, and it
+    # belongs here: its operands are an expression DAG to descend into.
     elif isinstance(expr, Expr):
         factorizer = QuantityFactorizer(quantities, mode=mode)
         factorized_expression = map_expr_dag(factorizer, expr)
         root_factor = _root_factor(factorizer, expr)
+    elif isinstance(expr, _base_form_terminals):
+        # Holds no operands, so nothing can be pulled out of it and it is dimensionless
+        # unless a mapping has already scaled it, which shows up as a FormSum weight.
+        factorized_expression = expr
+        root_factor = np.zeros(len(quantities))
     else:
         raise TypeError(f"Unsupported type for factorization: {type(expr).__name__}")
 
     return FactorizedExpr(factorized_expression, root_factor)
+
+
+def _factorize_form_sum(
+    form_sum: FormSum, quantities: Sequence[QuantityMixin], mode: str
+) -> tuple[FormSum, np.ndarray | None]:
+    """Factorize each term of a sum of base forms, weights included.
+
+    Scaling a dual object by a quantity produces a :class:`ufl.form.FormSum` carrying the
+    quantity as a *weight*, outside the expression DAG, so a term's factor is the one of
+    its component plus the one of its weight.
+    """
+    components: list[Expr | BaseForm] = []
+    weights: list[Expr | complex] = []
+    factors: list[np.ndarray | None] = []
+
+    for component, weight in zip(form_sum.components(), form_sum.weights()):
+        component, component_factor = factorize(component, quantities, mode=mode)
+
+        if isinstance(weight, Expr):
+            weight, weight_factor = factorize(weight, quantities, mode=mode)
+        else:
+            weight_factor = np.zeros(len(quantities))
+
+        components.append(component)
+        weights.append(weight)
+        if component_factor is None or weight_factor is None:
+            factors.append(None)
+        else:
+            factors.append(component_factor + weight_factor)
+
+    _check_consistent_factors(factors, quantities, mode, "components of FormSum")
+
+    return FormSum(*zip(components, weights)), (factors[0] if factors else None)
 
 
 def expand(factor: np.ndarray | Sequence, quantities: Sequence) -> sy.Expr:
@@ -364,7 +430,7 @@ def expand(factor: np.ndarray | Sequence, quantities: Sequence) -> sy.Expr:
 
 
 def get_dimension(
-    expr: Expr | Form, quantities: Sequence[QuantityMixin], mapping: dict | None = None
+    expr: Expr | BaseForm, quantities: Sequence[QuantityMixin], mapping: dict | None = None
 ) -> sy.Expr:
     """Get the physical dimension of an expression.
 
@@ -395,7 +461,7 @@ def normalize(
     expr_dict: dict[str, FactorizedExpr],
     reference_key: str,
     quantities: Sequence[QuantityMixin],
-) -> dict[str, Expr | Form]:
+) -> dict[str, Expr | BaseForm]:
     """Normalize expressions or forms with respect to a reference expression.
 
     Parameters
