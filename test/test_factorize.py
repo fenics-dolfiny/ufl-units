@@ -318,6 +318,23 @@ def test_vector_nodes(mesh, W, build):
     assert dimsys.equivalent_dims(dim, syu.length / syu.time)
 
 
+@pytest.mark.parametrize(
+    ("build", "space"),
+    [
+        (lambda q, u: ufl.classes.ReferenceGrad(q * ufl.classes.ReferenceValue(u)), "V"),
+        (lambda q, u: ufl.classes.ReferenceDiv(q * ufl.classes.ReferenceValue(u)), "W"),
+        (lambda q, u: ufl.classes.ReferenceCurl(q * ufl.classes.ReferenceValue(u)), "W"),
+    ],
+)
+def test_reference_nodes(mesh, V, W, build, space):
+    """A derivative against the reference cell keeps the dimension of its operand."""
+    u = ufl.Coefficient({"V": V, "W": W}[space])
+    u_ref = Quantity(mesh, 1.0, syu.kelvin, "u_ref")
+
+    dimsys = syu.si.SI.get_dimension_system()
+    assert dimsys.equivalent_dims(get_dimension(build(u_ref, u), [u_ref]), syu.temperature)
+
+
 def test_tensor_algebra(mesh, W):
     """Outer products and the determinant family combine dimensions multiplicatively."""
     u = ufl.Coefficient(W)
