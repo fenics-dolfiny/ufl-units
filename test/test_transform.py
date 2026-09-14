@@ -225,6 +225,46 @@ def test_div(mesh, V):
     assert syu.si.SI.get_dimension_system().equivalent_dims(dim, 1 / syu.length**2)
 
 
+@pytest.mark.parametrize("integrand", ["u", "L*u", "L*u**2"])
+def test_coordinate_derivative(mesh, V, W, integrand):
+    """A shape derivative sits one length below the form, as the Hadamard formula does."""
+    u = ufl.Coefficient(V)
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    u_ref = Quantity(mesh, 2.0, syu.kelvin, "u_ref")
+    direction = ufl.TestFunction(W)
+
+    f = {"u": u, "L*u": length * u, "L*u**2": length * u**2}[integrand]
+    quantities = [length, u_ref]
+    mapping = {mesh: length, u: u_ref * u}
+
+    hadamard = (ufl.dot(ufl.grad(f), direction) + f * ufl.div(direction)) * ufl.dx
+    lazy = ufl.derivative(f * ufl.dx, ufl.SpatialCoordinate(mesh), direction)
+
+    expected = factorize(hadamard, quantities, mapping=mapping).factor
+    form_factor = factorize(f * ufl.dx, quantities, mapping=mapping).factor
+
+    assert factorize(lazy, quantities, mapping=mapping).factor == pytest.approx(expected)
+    # One length lower than the form, and the same power of u_ref
+    assert expected == pytest.approx(form_factor - [1.0, 0.0])
+
+
+@pytest.mark.parametrize("integrand", ["L*u*v", "L*u**2*v", "u*v"])
+def test_coefficient_derivative(mesh, V, integrand):
+    """Differentiating against a mapped coefficient divides its reference value out."""
+    u, v = ufl.Coefficient(V), ufl.TestFunction(V)
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    u_ref = Quantity(mesh, 2.0, syu.kelvin, "u_ref")
+
+    f = {"L*u*v": length * u * v, "L*u**2*v": length * u**2 * v, "u*v": u * v}[integrand]
+    quantities = [length, u_ref]
+    mapping = {mesh: length, u: u_ref * u}
+
+    form_factor = factorize(f * ufl.dx, quantities, mapping=mapping).factor
+    derivative_factor = factorize(ufl.derivative(f * ufl.dx, u), quantities, mapping=mapping).factor
+
+    assert derivative_factor == pytest.approx(form_factor - [0.0, 1.0])
+
+
 @pytest.mark.parametrize(("measure", "exponent"), [("dx", 2.0), ("ds", 1.0)])
 def test_measure_scaling(mesh, V, measure, exponent):
     """A cell measure scales with tdim, an exterior facet measure with tdim - 1."""

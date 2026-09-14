@@ -169,6 +169,23 @@ class QuantityFactorizer(MultiFunction):
     def expr_list(self, o, *ops):
         return self.reuse_if_untouched(o, *ops)
 
+    def expr_mapping(self, o, *ops):
+        return self.reuse_if_untouched(o, *ops)
+
+    def coefficient_derivative(self, o, *ops):
+        """Divide by what is differentiated against, multiply by the direction."""
+        integrand, variables, directions = o.ufl_operands[:3]
+        zero = np.zeros(len(self._quantities))
+
+        factor = self.factors.get(integrand, zero).copy()
+        for variable in variables.ufl_operands:
+            factor -= self.factors.get(variable, zero)
+        for direction in directions.ufl_operands:
+            factor += self.factors.get(direction, zero)
+
+        self.factors[o] = factor
+        return self.reuse_if_untouched(o, *ops)
+
     def _check_operands(self, o, reference_factor, operands=None):
         r"""Check that all operands of the expression are consistent with a reference factor.
 
@@ -212,6 +229,10 @@ class QuantityFactorizer(MultiFunction):
     curl = linear
     nabla_grad = linear
     nabla_div = linear
+    reference_value = linear
+    reference_grad = linear
+    reference_div = linear
+    reference_curl = linear
     conj = linear
     real = linear
     imag = linear
@@ -224,7 +245,6 @@ class QuantityFactorizer(MultiFunction):
     perp = linear
     trace = linear
     variable = linear
-    coefficient_derivative = linear
     component_tensor = linear
     list_tensor = linear
     restricted = linear
@@ -232,6 +252,11 @@ class QuantityFactorizer(MultiFunction):
     facet_avg = linear
     max_value = linear
     min_value = linear
+
+    # Differentiates against the mesh coordinates, which the mapping has already scaled.
+    coordinate_derivative = coefficient_derivative
+    base_form_coordinate_derivative = coefficient_derivative
+    base_form_operator_coordinate_derivative = coefficient_derivative
 
     variable_derivative = division
 
