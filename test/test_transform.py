@@ -6,6 +6,7 @@ import pytest
 import sympy as sy
 import sympy.physics.units as syu
 from ufl_units import (
+    InconsistentDimensions,
     Quantity,
     UnitTransformer,
     collect_quantities,
@@ -243,9 +244,9 @@ def test_coordinate_derivative(mesh, V, W, integrand):
     expected = factorize(hadamard, quantities, mapping=mapping).factor
     form_factor = factorize(f * ufl.dx, quantities, mapping=mapping).factor
 
-    assert factorize(lazy, quantities, mapping=mapping).factor == pytest.approx(expected)
+    assert list(factorize(lazy, quantities, mapping=mapping).factor) == list(expected)
     # One length lower than the form, and the same power of u_ref
-    assert expected == pytest.approx(form_factor - [1.0, 0.0])
+    assert list(expected) == list(form_factor - [1, 0])
 
 
 @pytest.mark.parametrize("integrand", ["L*u*v", "L*u**2*v", "u*v"])
@@ -262,7 +263,7 @@ def test_coefficient_derivative(mesh, V, integrand):
     form_factor = factorize(f * ufl.dx, quantities, mapping=mapping).factor
     derivative_factor = factorize(ufl.derivative(f * ufl.dx, u), quantities, mapping=mapping).factor
 
-    assert derivative_factor == pytest.approx(form_factor - [0.0, 1.0])
+    assert list(derivative_factor) == list(form_factor - [0, 1])
 
 
 @pytest.mark.parametrize(("measure", "exponent"), [("dx", 2.0), ("ds", 1.0)])
@@ -284,6 +285,55 @@ def test_interior_facet_measure(mesh, V):
     form = ufl.avg(u) * ufl.avg(v) * ufl.dS
     factorized = factorize(form, [length], mapping={mesh: length})
     assert factorized.factor[0] == pytest.approx(1.0)
+
+
+def _sipg(mesh, u, v, kappa, penalty):
+    """Symmetric interior penalty form, with Nitsche terms for the boundary."""
+    n, h = ufl.FacetNormal(mesh), ufl.CellDiameter(mesh)
+    alpha = 10.0
+    return kappa * (
+        ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
+        - ufl.inner(ufl.avg(ufl.grad(u)), ufl.jump(v, n)) * ufl.dS
+        - ufl.inner(ufl.jump(u, n), ufl.avg(ufl.grad(v))) * ufl.dS
+        + alpha * penalty(ufl.avg(h)) * ufl.inner(ufl.jump(u, n), ufl.jump(v, n)) * ufl.dS
+        - ufl.inner(ufl.grad(u), n) * v * ufl.ds
+        - ufl.inner(ufl.grad(v), n) * u * ufl.ds
+        + alpha * penalty(h) * u * v * ufl.ds
+    )
+
+
+def test_dg_nitsche_form(mesh, V):
+    """Volume, jump, average and h^-1 penalty terms of SIPG/Nitsche share one factor."""
+    u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    kappa = Quantity(mesh, 1e-3, syu.meter**2 / syu.second, "kappa")
+
+    form = _sipg(mesh, u, v, kappa, lambda h: 1 / h)
+    factorized = factorize(form, [length, kappa], mapping={mesh: length})
+    assert factorized.factor == pytest.approx([0.0, 1.0])
+    assert len(factorized.dimless_numbers) == 0
+
+
+def test_dg_nitsche_wrong_penalty(mesh, V):
+    """A penalty scaled by h^-2 is a length off the other terms, and is caught."""
+    u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    kappa = Quantity(mesh, 1e-3, syu.meter**2 / syu.second, "kappa")
+
+    form = _sipg(mesh, u, v, kappa, lambda h: 1 / h**2)
+    with pytest.raises(InconsistentDimensions, match="Inconsistent dimensions across integrals"):
+        factorize(form, [length, kappa], mapping={mesh: length})
+
+
+@pytest.mark.parametrize("jump", [lambda u, n: ufl.jump(u), lambda u, n: ufl.jump(u, n)])
+def test_jump(mesh, V, jump):
+    """A jump keeps the dimension of its operand, the normal adds none."""
+    u = ufl.Coefficient(V)
+    u_ref = Quantity(mesh, 1.0, syu.kelvin, "u_ref")
+
+    factorized = factorize(jump(u_ref * u, ufl.FacetNormal(mesh)), [u_ref])
+    assert factorized.factor == pytest.approx([1.0])
+    assert collect_quantities(factorized.expr) == []
 
 
 _supported_integral_types = sorted(_integral_type_codim) + list(point_integral_types)

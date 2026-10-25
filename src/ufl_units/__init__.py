@@ -10,6 +10,7 @@ It depends on UFL only, so quantities carry no values. Bind values by mixing
 """
 
 from ufl_units.analysis import buckingham_pi_analysis, dimension_matrix
+from ufl_units.exceptions import InconsistentDimensions
 from ufl_units.factorize import (
     FactorizedExpr,
     QuantityFactorizer,
@@ -24,6 +25,7 @@ from ufl_units.transform import UnitTransformer, collect_quantities, transform
 
 __all__ = [
     "FactorizedExpr",
+    "InconsistentDimensions",
     "Quantity",
     "QuantityFactorizer",
     "QuantityMixin",

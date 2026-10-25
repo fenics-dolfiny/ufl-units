@@ -59,11 +59,11 @@ def test_factorize_quantity(unit_square):
     """Factorizing pulls the quantity out, leaving the area of the unit square behind."""
     length = Quantity(2.0, syu.kilometer, "L")
 
-    dimensionless, factor = factorize(length * ufl.dx(unit_square), [length])
+    factorized = factorize(length * ufl.dx(unit_square), [length])
 
-    assert collect_quantities(dimensionless) == []
-    assert float(expand(factor, [length.factor])) == pytest.approx(2000.0)
-    assert assemble(dimensionless) == pytest.approx(1.0)
+    assert collect_quantities(factorized.expr) == []
+    assert float(expand(factorized.factor, [length.factor])) == pytest.approx(2000.0)
+    assert assemble(factorized.expr) == pytest.approx(1.0)
 
 
 def test_factorize_form(flux):
@@ -71,17 +71,17 @@ def test_factorize_form(flux):
     form, mapping, (kappa, l_ref, T_ref) = flux
 
     quantities = collect_quantities(form, mapping=mapping)
-    dimensionless, factor = factorize(form, quantities, mapping=mapping)
+    factorized = factorize(form, quantities, mapping=mapping)
 
     dimsys = syu.si.SI.get_dimension_system()
     assert dimsys.equivalent_dims(get_dimension(form, quantities, mapping=mapping), syu.power)
     assert quantities == [kappa, l_ref, T_ref]
-    assert factor == pytest.approx([1.0, 1.0, 1.0])
-    assert collect_quantities(dimensionless) == []
+    assert factorized.factor == pytest.approx([1.0, 1.0, 1.0])
+    assert collect_quantities(factorized.expr) == []
 
-    scale = float(expand(factor, [q.factor for q in quantities]))
+    scale = float(expand(factorized.factor, [q.factor for q in quantities]))
     assert scale == pytest.approx(kappa.factor * l_ref.factor * T_ref.factor)
-    assert scale * assemble(dimensionless) == pytest.approx(assemble(transform(form, mapping)))
+    assert scale * assemble(factorized.expr) == pytest.approx(assemble(transform(form, mapping)))
 
 
 def test_factorize_interpolate(unit_square):
@@ -94,12 +94,12 @@ def test_factorize_interpolate(unit_square):
     T_ref = Quantity(300.0, syu.kelvin, "T_ref")
     interpolated = firedrake.Interpolate(T_ref * temperature, W)
 
-    dimensionless, factor = factorize(interpolated, [T_ref])
-    assert factor == pytest.approx([1.0])
-    assert collect_quantities(dimensionless) == []
+    factorized = factorize(interpolated, [T_ref])
+    assert factorized.factor == pytest.approx([1.0])
+    assert collect_quantities(factorized.expr) == []
 
-    scale = float(expand(factor, [T_ref.factor]))
-    remainder = firedrake.assemble(dimensionless).dat.data_ro
+    scale = float(expand(factorized.factor, [T_ref.factor]))
+    remainder = firedrake.assemble(factorized.expr).dat.data_ro
     assert scale * remainder == pytest.approx(firedrake.assemble(interpolated).dat.data_ro)
 
 
@@ -127,11 +127,11 @@ def test_factorize_after_scale_change(flux):
     form, mapping, (kappa, _, _) = flux
 
     quantities = collect_quantities(form, mapping=mapping)
-    dimensionless, factor = factorize(form, quantities, mapping=mapping)
-    remainder = assemble(dimensionless)
+    factorized = factorize(form, quantities, mapping=mapping)
+    remainder = assemble(factorized.expr)
 
     kappa.scale = 3.0
-    scale = float(expand(factor, [q.factor for q in quantities]))
+    scale = float(expand(factorized.factor, [q.factor for q in quantities]))
 
-    assert assemble(dimensionless) == pytest.approx(remainder)
+    assert assemble(factorized.expr) == pytest.approx(remainder)
     assert scale * remainder == pytest.approx(assemble(transform(form, mapping)))

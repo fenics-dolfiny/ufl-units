@@ -73,5 +73,5 @@ def test_poisson(mesh, V) -> None:
     rhs_dim = get_dimension(terms["source"], quantities, mapping=mapping)
     assert syu.si.SI.get_dimension_system().equivalent_dims(diffusion_dim, rhs_dim)
 
-    factorized = factorize(terms, quantities, mode="factorize", mapping=mapping)
+    factorized = factorize(terms, quantities, mapping=mapping)
     normalize(factorized, "source", quantities)
