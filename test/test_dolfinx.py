@@ -62,11 +62,11 @@ def test_factorize_quantity(unit_square):
     """Factorizing pulls the quantity out, leaving the area of the unit square behind."""
     length = Quantity(unit_square, 2.0, syu.kilometer, "L")
 
-    dimensionless, factor = factorize(length * ufl.dx(unit_square), [length])
+    factorized = factorize(length * ufl.dx(unit_square), [length])
 
-    assert collect_quantities(dimensionless) == []
-    assert float(expand(factor, [length.factor])) == pytest.approx(2000.0)
-    assert assemble(dimensionless, unit_square) == pytest.approx(1.0)
+    assert collect_quantities(factorized.expr) == []
+    assert float(expand(factorized.factor, [length.factor])) == pytest.approx(2000.0)
+    assert assemble(factorized.expr, unit_square) == pytest.approx(1.0)
 
 
 def test_factorize_form(unit_square, flux):
@@ -74,17 +74,17 @@ def test_factorize_form(unit_square, flux):
     form, mapping, (kappa, l_ref, T_ref) = flux
 
     quantities = collect_quantities(form, mapping=mapping)
-    dimensionless, factor = factorize(form, quantities, mapping=mapping)
+    factorized = factorize(form, quantities, mapping=mapping)
 
     dimsys = syu.si.SI.get_dimension_system()
     assert dimsys.equivalent_dims(get_dimension(form, quantities, mapping=mapping), syu.power)
     assert quantities == [kappa, l_ref, T_ref]
-    assert factor == pytest.approx([1.0, 1.0, 1.0])
-    assert collect_quantities(dimensionless) == []
+    assert factorized.factor == pytest.approx([1.0, 1.0, 1.0])
+    assert collect_quantities(factorized.expr) == []
 
-    scale = float(expand(factor, [q.factor for q in quantities]))
+    scale = float(expand(factorized.factor, [q.factor for q in quantities]))
     assert scale == pytest.approx(kappa.factor * l_ref.factor * T_ref.factor)
-    assert scale * assemble(dimensionless, unit_square) == pytest.approx(
+    assert scale * assemble(factorized.expr, unit_square) == pytest.approx(
         assemble(transform(form, mapping), unit_square)
     )
 
@@ -94,11 +94,11 @@ def test_factorize_after_scale_change(unit_square, flux):
     form, mapping, (kappa, _, _) = flux
 
     quantities = collect_quantities(form, mapping=mapping)
-    dimensionless, factor = factorize(form, quantities, mapping=mapping)
-    remainder = assemble(dimensionless, unit_square)
+    factorized = factorize(form, quantities, mapping=mapping)
+    remainder = assemble(factorized.expr, unit_square)
 
     kappa.scale = 3.0
-    scale = float(expand(factor, [q.factor for q in quantities]))
+    scale = float(expand(factorized.factor, [q.factor for q in quantities]))
 
-    assert assemble(dimensionless, unit_square) == pytest.approx(remainder)
+    assert assemble(factorized.expr, unit_square) == pytest.approx(remainder)
     assert scale * remainder == pytest.approx(assemble(transform(form, mapping), unit_square))

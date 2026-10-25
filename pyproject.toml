@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ufl-units"
-version = "0.1.0.dev0"
+version = "1.0.0"
 description = "Physical units and dimensional analysis for UFL expressions and forms."
 authors = [
   { name = "Michal Habera", email = "michal.habera@gmail.com" },
@@ -18,6 +18,9 @@ license-files = ["LICENSE"]
 requires-python = ">=3.12.0"
 dependencies = ["fenics-ufl", "numpy", "sympy"]
 
+[project.urls]
+repository = "https://github.com/fenics-dolfiny/ufl-units"
+
 [dependency-groups]
 lint-format = ["ruff"]
 lint-typing = ["mypy", "ty"]
@@ -29,9 +32,6 @@ lint = [
 ]
 # Concrete elements live in basix, not in UFL, so a mesh cannot be built from UFL alone.
 test = ["pytest", "pytest-xdist", "coverage", "fenics-basix"]
-
-[project.urls]
-repository = "https://github.com/fenics-dolfiny/ufl-units"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -57,30 +57,30 @@ indent-width = 4
 
 [tool.ruff.lint]
 select = [
-  "D",   # pydocstyle
-  "E",   # pycodestyle
-  "W",   # pycodestyle
-  "F",   # pyflakes
-  "I",   # isort - use standalone isort
-  "RUF", # Ruff-specific rules
+  "D",  # pydocstyle
+  "E",  # pycodestyle
+  "W",  # pycodestyle
+  "F",  # pyflakes
+  "I",  # isort - use standalone isort
+  "RUF",  # Ruff-specific rules
   "UP",  # pyupgrade
-  "ICN", # flake8-import-conventions
-  "NPY", # numpy-specific rules
-  "FLY", # use f-string not static joins
+  "ICN",  # flake8-import-conventions
+  "NPY",  # numpy-specific rules
+  "FLY",  # use f-string not static joins
 ]
 ignore = [
-  "D1",   # undocumented
-  "D203", # incompatible with D203 `no-blank-line-before-class`
-  "D213", # incomptabile with D212 `multi-line-summary-first-line`
+  "D1",  # undocumented
+  "D203",  # incompatible with D203 `no-blank-line-before-class`
+  "D213",  # incomptabile with D212 `multi-line-summary-first-line`
 ]
 unfixable = [
-  "F401", # skip removal of unused imports
+  "F401",  # skip removal of unused imports
 ]
 
 allowed-confusables = ["σ", "×"]
 
 [tool.ruff.lint.per-file-ignores]
-"!src/**.py" = ["D"] # no docstring linting outside of src/
+"!src/**.py" = ["D"]  # no docstring linting outside of src/
 
 [tool.ruff.lint.isort]
 # These rules mirror dolfiny's, including `ufl_units` being sorted as a third-party
@@ -102,12 +102,12 @@ section-order = [
 "mpi" = ["mpi4py", "petsc4py"]
 "fenics" = ["basix", "dolfinx", "ffcx", "ufl"]
 
+[tool.ruff.lint.flake8-import-conventions]
+banned-from = ["numpy"]
+
 [tool.ruff.lint.flake8-import-conventions.extend-aliases]
 "numpy.typing" = "npt"
 "numpy" = "np"
-
-[tool.ruff.lint.flake8-import-conventions]
-banned-from = ["numpy"]
 
 [tool.ty.rules]
 possibly-missing-submodule = "ignore"

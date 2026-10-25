@@ -33,8 +33,11 @@ ufl_units.buckingham_pi_analysis(quantities)
 
 print(ufl_units.get_dimension(form, quantities, mapping=mapping))
 
-# Strip the dimensional scale off the form, leaving the dimensionless remainder
-dimensionless, factor = ufl_units.factorize(form, quantities, mapping=mapping)
+# Strip the dimensional scale off the form, leaving the dimensionless remainder. Terms
+# may carry different scales: their ratios are the dimensionless groups of the problem,
+# kept in the remainder and reported as exponent vectors over `quantities`
+factorized = ufl_units.factorize(form, quantities, mapping=mapping)
+print(factorized.expr, factorized.factor, factorized.dimless_numbers)
 ```
 
 # Binding values
@@ -70,6 +73,28 @@ from ufl_units.backends.firedrake import Quantity  # Quantity(scale, unit, symbo
 
 A Firedrake constant is not tied to a mesh, so that flavour takes no domain; the measure it is
 integrated against carries the domain instead.
+
+# Demos
+
+The `demo/` folder holds the examples of the accompanying manuscript. Both need dolfinx, so
+run them in the `ufl-units (dolfinx)` devcontainer (see below), or in any environment with
+dolfinx and `ufl-units` installed:
+
+```bash
+cd demo
+python3 navier_stokes.py
+python3 neo_hooke.py
+```
+
+- `navier_stokes.py` prints the Buckingham Pi analysis and the normalized terms of the
+  incompressible Navier-Stokes equations. It then sweeps the Euler number and writes the
+  condition number of the lid-driven cavity Jacobian to `navier_stokes_condition_number.txt`,
+  the data of the conditioning figure. The sweep is set with `--eu-min`, `--eu-max` and
+  `--num-eu`, and the output file with `--output`. Run it on a single MPI rank, since the
+  condition number is computed from the dense matrix.
+- `neo_hooke.py` prints the Buckingham Pi analysis of Neo-Hooke hyperelasticity, the
+  dimensionless numbers of the standard energy, and the normalized terms of its expansion in
+  the Green-Lagrange strain.
 
 # Development
 

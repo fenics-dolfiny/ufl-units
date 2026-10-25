@@ -1,12 +1,17 @@
-import ufl
+import fractions
 
+import ufl
+from ufl.algorithms.apply_algebra_lowering import apply_algebra_lowering
+from ufl.algorithms.apply_derivatives import apply_derivatives
+
+import numpy as np
 import pytest
 import sympy as sy
 import sympy.physics.units as syu
 from ufl_units import (
     FactorizedExpr,
+    InconsistentDimensions,
     Quantity,
-    QuantityFactorizer,
     collect_quantities,
     expand,
     factorize,
@@ -54,42 +59,247 @@ def test_inconsistent_units(mesh):
     length = Quantity(mesh, 1.0, unit=syu.meter, symbol=L_symbol)
     time = Quantity(mesh, 1.0, unit=syu.second, symbol=T_symbol)
     expr = length + time
-    with pytest.raises(RuntimeError, match="Inconsistent dimensions"):
-        factorize(expr, [length, time], mode="check")
-
-
-def test_invalid_mode(mesh):
-    """Only "factorize" and "check" are accepted modes."""
-    ell = Quantity(mesh, 1.0, unit=syu.meter, symbol="ell")
-    with pytest.raises(RuntimeError, match="not a valid factorisation mode"):
-        factorize(ell, [ell], mode="nonsense")
+    with pytest.raises(InconsistentDimensions, match="Inconsistent dimensions"):
+        factorize(expr, [length, time])
 
 
 def test_sin_nontrivial_arg(mesh):
-    """No scale can be pulled out of sin(k*ell), even though its argument is dimensionless."""
+    """No scale can be pulled out of sin(k*ell), so its argument stays in the expression."""
     k = Quantity(mesh, 1.0, unit=1 / syu.meter, symbol=sy.Symbol("k"))
     ell = Quantity(mesh, 1.0, unit=syu.meter, symbol=sy.Symbol("ell"))
 
-    with pytest.raises(RuntimeError):
-        factorize(ufl.sin(k * ell), [k, ell], mode="factorize")
-
-
-def test_sin_nontrivial_arg_check(mesh):
-    """The same expression should still be admissible in dimensional check mode."""
-    k = Quantity(mesh, 1.0, unit=1 / syu.meter, symbol=sy.Symbol("k"))
-    ell = Quantity(mesh, 1.0, unit=syu.meter, symbol=sy.Symbol("ell"))
-
-    checked = factorize(ufl.sin(k * ell), [k, ell], mode="check")
-    assert checked.factor is not None
+    factorized = factorize(ufl.sin(k * ell), [k, ell])
+    assert factorized.factor == pytest.approx([0.0, 0.0])
+    assert set(collect_quantities(factorized.expr)) == {k, ell}
 
 
 def test_sin_trivial_arg(mesh):
     """sin(ell/ell) has a zero exponent vector and is factorizable."""
     ell = Quantity(mesh, 1.0, unit=syu.meter, symbol=sy.Symbol("ell"))
 
-    factorized = factorize(ufl.sin(ell / ell), [ell], mode="factorize")
+    factorized = factorize(ufl.sin(ell / ell), [ell])
     assert factorized.factor is not None
     assert factorized.factor[0] == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+    "function",
+    [
+        ufl.exp,
+        ufl.ln,
+        ufl.sin,
+        ufl.cos,
+        ufl.tan,
+        ufl.sinh,
+        ufl.cosh,
+        ufl.tanh,
+        ufl.asin,
+        ufl.acos,
+        ufl.atan,
+        ufl.erf,
+        lambda x: ufl.bessel_J(1, x),
+    ],
+)
+def test_nontrivial_dimensionless_arg(mesh, V, function):
+    """An Arrhenius-type argument E/(R*T) is kept whole, and reported as a dimensionless group."""
+    u = ufl.Coefficient(V)
+    energy = Quantity(mesh, 5e4, syu.joule / syu.mol, "E")
+    gas = Quantity(mesh, 8.314, syu.joule / (syu.mol * syu.kelvin), "R")
+    temp = Quantity(mesh, 300.0, syu.kelvin, "T")
+
+    factorized = factorize(function(energy / (gas * temp * u)), [energy, gas, temp])
+    assert factorized.factor == pytest.approx([0.0, 0.0, 0.0])
+    assert set(collect_quantities(factorized.expr)) == {energy, gas, temp}
+    assert_same_span(factorized.dimless_numbers, [[1.0, -1.0, -1.0]])
+
+    with pytest.raises(InconsistentDimensions, match="Inconsistent dimensions"):
+        factorize(function(energy / (gas * u)), [energy, gas, temp])
+
+
+def test_atan2(mesh):
+    """atan2 of two lengths is a dimensionless angle, their ratio stays in the expression."""
+    l_one = Quantity(mesh, 1.0, syu.meter, "L1")
+    l_two = Quantity(mesh, 2.0, syu.meter, "L2")
+    y, x = ufl.Constant(mesh), ufl.Constant(mesh)
+
+    factorized = factorize(ufl.atan2(l_one * y, l_two * x), [l_one, l_two])
+    assert factorized.factor == pytest.approx([0.0, 0.0])
+    assert_same_span(factorized.dimless_numbers, [[1.0, -1.0]])
+
+
+def test_atan2_inconsistent(mesh):
+    """atan2 of a length and a time is meaningless."""
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    time = Quantity(mesh, 1.0, syu.second, "T")
+
+    with pytest.raises(InconsistentDimensions, match="Inconsistent dimensions"):
+        factorize(ufl.atan2(length * ufl.Constant(mesh), time * ufl.Constant(mesh)), [length, time])
+
+
+def assert_same_span(dimless_numbers, expected):
+    """Compare dimensionless numbers by the subspace they span."""
+
+    def rank(vectors):
+        return np.linalg.matrix_rank(np.asarray(vectors, dtype=float)) if len(vectors) else 0
+
+    assert rank(dimless_numbers) == rank(expected) == rank([*dimless_numbers, *expected]), (
+        f"{dimless_numbers} and {expected} span different subspaces"
+    )
+
+
+def test_dimless_numbers_of_nonhomogeneous_node(mesh):
+    """The argument of sin must be dimensionless, so its factor is a dimensionless group."""
+    k = Quantity(mesh, 1.0, unit=1 / syu.meter, symbol=sy.Symbol("k"))
+    ell = Quantity(mesh, 1.0, unit=syu.meter, symbol=sy.Symbol("ell"))
+
+    checked = factorize(ufl.sin(k * ell), [k, ell])
+    assert_same_span(checked.dimless_numbers, [[1.0, 1.0]])
+
+
+def test_dimless_numbers_of_sum(mesh, V):
+    """Two lengths added together are one group, whichever order the operands come in."""
+    u = ufl.Coefficient(V)
+    l_one = Quantity(mesh, 1.0, syu.meter, "L1")
+    l_two = Quantity(mesh, 2.0, syu.meter, "L2")
+
+    checked = factorize(l_one * u + l_two * u, [l_one, l_two])
+    assert_same_span(checked.dimless_numbers, [[1.0, -1.0]])
+
+
+def test_dimless_numbers_of_powers_and_roots(mesh, V):
+    """A group, its inverse, its square and its root all lie on one line."""
+    u = ufl.Coefficient(V)
+    l_one = Quantity(mesh, 1.0, syu.meter, "L1")
+    l_two = Quantity(mesh, 2.0, syu.meter, "L2")
+
+    expr = (
+        (l_one * u + l_two * u)
+        * (l_two * l_two * u + l_one * l_one * u)
+        * (ufl.sqrt(l_one * u) + ufl.sqrt(l_two * u))
+    )
+
+    checked = factorize(expr, [l_one, l_two])
+    assert_same_span(checked.dimless_numbers, [[1.0, -1.0]])
+
+
+def test_dimless_numbers_of_form_integrals(mesh, V):
+    """Integrals that share a dimension but not a factor differ by a dimensionless group."""
+    u, v = ufl.Coefficient(V), ufl.TestFunction(V)
+    l_one = Quantity(mesh, 1.0, syu.meter, "L1")
+    l_two = Quantity(mesh, 2.0, syu.meter, "L2")
+
+    form = l_one * u * v * ufl.dx(1) + l_two * u * v * ufl.dx(2)
+
+    checked = factorize(form, [l_one, l_two])
+    assert_same_span(checked.dimless_numbers, [[1.0, -1.0]])
+
+
+def test_dimless_numbers_of_form_sum(mesh, V):
+    """Components of a FormSum are compared with their weights, and so are their groups."""
+    l_one = Quantity(mesh, 1.0, syu.meter, "L1")
+    l_two = Quantity(mesh, 2.0, syu.meter, "L2")
+
+    form_sum = ufl.FormSum((ufl.Cofunction(V.dual()), l_one), (ufl.Cofunction(V.dual()), l_two))
+
+    checked = factorize(form_sum, [l_one, l_two])
+    assert_same_span(checked.dimless_numbers, [[1.0, -1.0]])
+
+
+def test_no_dimless_numbers_of_homogeneous_form(mesh, V):
+    """Terms that all carry the same factor differ by no dimensionless number."""
+    u, v = ufl.Coefficient(V), ufl.TestFunction(V)
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+
+    form = length * u * v * ufl.dx + length * ufl.sin(u) * v * ufl.dx
+    assert_same_span(factorize(form, [length]).dimless_numbers, [])
+
+
+def test_no_quantities(mesh, V):
+    """With nothing to factorize out, every term trivially agrees and no group is reported."""
+    u, v = ufl.Coefficient(V), ufl.TestFunction(V)
+
+    checked = factorize(u * v * ufl.dx, [])
+    assert checked.factor == pytest.approx([])
+    assert_same_span(checked.dimless_numbers, [])
+
+
+@pytest.mark.parametrize(
+    ("build", "equivalent"),
+    [
+        # Reassociation and reordering of a sum
+        (
+            lambda q, x: (q[0] * x[0] + q[1] * x[1]) + q[2] * x[2],
+            lambda q, x: q[0] * x[0] + (q[1] * x[1] + q[2] * x[2]),
+        ),
+        (
+            lambda q, x: (q[0] * x[0] + q[1] * x[1]) + q[2] * x[2],
+            lambda q, x: (q[2] * x[2] + q[0] * x[0]) + q[1] * x[1],
+        ),
+        # Distributivity
+        (
+            lambda q, x: q[0] * (q[1] * x[0] + q[2] * x[1]),
+            lambda q, x: q[0] * q[1] * x[0] + q[0] * q[2] * x[1],
+        ),
+        # Shared and duplicated subexpressions
+        (
+            lambda q, x: (q[0] * x[0] + q[1] * x[1]) ** 2,
+            lambda q, x: (q[0] * x[0] + q[1] * x[1]) * (q[0] * x[0] + q[1] * x[1]),
+        ),
+        # Terms UFL simplifies away
+        (
+            lambda q, x: q[0] * x[0] + 0 * q[1] * x[1],
+            lambda q, x: q[0] * x[0] * 1,
+        ),
+    ],
+)
+def test_equivalent_expressions(mesh, build, equivalent):
+    """Equivalent expressions agree in dimension and in the span of their dimensionless numbers.
+
+    The root factor of a sum follows the operand order, so it is fixed only up to one of
+    those numbers. Either way the factorization is exact.
+    """
+    q = [Quantity(mesh, s, syu.meter, f"L{i}") for i, s in enumerate((2.0, 3.0, 5.0))]
+    x = [ufl.Constant(mesh) for _ in range(3)]
+    values = {k: ufl.as_ufl(v) for k, v in zip([*q, *x], [2.0, 3.0, 5.0, 0.7, -1.3, 0.4])}
+    dimsys = syu.si.SI.get_dimension_system()
+
+    a, b = factorize(build(q, x), q), factorize(equivalent(q, x), q)
+
+    dim_a, dim_b = (expand(f.factor, [qi.dimension for qi in q]).simplify() for f in (a, b))
+    assert dimsys.equivalent_dims(dim_a, dim_b)
+    assert_same_span(a.dimless_numbers, b.dimless_numbers)
+    assert_same_span([*a.dimless_numbers, a.factor - b.factor], a.dimless_numbers)
+
+    for expr, f in ((build(q, x), a), (equivalent(q, x), b)):
+        exact = float(ufl.replace(expr, values))
+        assert float(ufl.replace(expand(f.factor, q) * f.expr, values)) == pytest.approx(exact)
+
+
+def test_equivalent_derivatives(mesh, V):
+    """A derivative factorizes alike whether or not it is expanded first.
+
+    Expanding reorders the terms, so the root factors agree up to a dimensionless number.
+    """
+    u, du = ufl.Coefficient(V), ufl.TestFunction(V)
+    l_one = Quantity(mesh, 1.0, syu.meter, "L1")
+    l_two = Quantity(mesh, 2.0, syu.meter, "L2")
+
+    derivative = ufl.derivative((l_one * u * u + l_two * u) * ufl.dx, u, du)
+    expanded = apply_derivatives(apply_algebra_lowering(derivative))
+
+    a, b = factorize(derivative, [l_one, l_two]), factorize(expanded, [l_one, l_two])
+    assert_same_span(a.dimless_numbers, b.dimless_numbers)
+    assert_same_span([*a.dimless_numbers, a.factor - b.factor], a.dimless_numbers)
+
+
+def test_cancellation_is_reported(mesh):
+    """UFL does not cancel (a + b) - b, so the number b/a is reported, unlike for a alone."""
+    l_one = Quantity(mesh, 1.0, syu.meter, "L1")
+    l_two = Quantity(mesh, 2.0, syu.meter, "L2")
+    a, b = l_one * ufl.Constant(mesh), l_two * ufl.Constant(mesh)
+
+    assert_same_span(factorize(a, [l_one, l_two]).dimless_numbers, [])
+    assert_same_span(factorize((a + b) - b, [l_one, l_two]).dimless_numbers, [[1.0, -1.0]])
 
 
 def test_normalize_expr(mesh):
@@ -129,6 +339,22 @@ def test_sqrt(mesh):
     assert syu.si.SI.get_dimension_system().equivalent_dims(dim, syu.length)
 
 
+def test_rational_power(mesh):
+    """A cube root of a volume is a length, though 1/3 is held as the nearest float."""
+    volume = Quantity(mesh, 1.0, syu.meter**3, "V")
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+
+    factorized = factorize(volume ** (1 / 3), [volume])
+    assert factorized.factor[0] == fractions.Fraction(1 / 3)
+
+    checked = factorize(volume ** (1 / 3) + length, [volume, length])
+    assert list(checked.factor) == [0, 1]
+    assert [list(g) for g in checked.dimless_numbers] == [[fractions.Fraction(1 / 3), -1]]
+
+    with pytest.raises(InconsistentDimensions):
+        factorize(volume ** (1 / 3) + length**2, [volume, length])
+
+
 def test_plain_constant(mesh):
     """A UFL constant that is not among the quantities is left in place, unscaled."""
     length = Quantity(mesh, 1.0, syu.meter, "L")
@@ -145,7 +371,8 @@ def test_variable(mesh, V):
     u = ufl.Coefficient(V)
     length = Quantity(mesh, 1.0, syu.meter, "L")
 
-    factorized = factorize(ufl.variable(length * u), [length])
+    # Not `ufl.variable`, which ty resolves to the submodule of that name.
+    factorized = factorize(ufl.operators.variable(length * u), [length])
     assert factorized.factor[0] == pytest.approx(1.0)
 
 
@@ -155,14 +382,6 @@ def test_nonscalar_quantity(mesh):
 
     with pytest.raises(NotImplementedError, match="non-scalar quantities"):
         factorize(ufl.sqrt(tensor[0] * tensor[0]), [tensor])
-
-
-def test_factorizer_invalid_mode(mesh):
-    """The factorizer rejects an unknown mode on construction."""
-    length = Quantity(mesh, 1.0, syu.meter, "L")
-
-    with pytest.raises(ValueError, match="Invalid mode"):
-        QuantityFactorizer([length], mode="nonsense")
 
 
 def test_invalid_type(mesh):
@@ -179,23 +398,21 @@ def test_form_inconsistent_integral_dimensions(mesh, V):
     length = Quantity(mesh, 1.0, syu.meter, "L")
 
     form = u * v * ufl.dx(1) + length * u * v * ufl.dx(2)
-    with pytest.raises(RuntimeError, match="Inconsistent dimensions across integrals"):
-        factorize(form, [length], mode="check")
+    with pytest.raises(InconsistentDimensions, match="Inconsistent dimensions across integrals"):
+        factorize(form, [length])
 
 
 def test_form_inconsistent_integral_factors(mesh, V):
-    """Integrals may share a dimension and still carry different factors."""
+    """Integrals that share a dimension but not a factor are rescaled to the first one."""
     u, v = ufl.Coefficient(V), ufl.TestFunction(V)
     l_one = Quantity(mesh, 1.0, syu.meter, "L1")
     l_two = Quantity(mesh, 2.0, syu.meter, "L2")
 
     form = l_one * u * v * ufl.dx(1) + l_two * u * v * ufl.dx(2)
 
-    # Dimensionally consistent, so check mode accepts it
-    factorize(form, [l_one, l_two], mode="check")
-
-    with pytest.raises(RuntimeError, match="Inconsistent factors across integrals"):
-        factorize(form, [l_one, l_two], mode="factorize")
+    factorized = factorize(form, [l_one, l_two])
+    assert factorized.factor == pytest.approx([1.0, 0.0])
+    assert set(collect_quantities(factorized.expr)) == {l_one, l_two}
 
 
 def test_interpolate_is_linear(mesh, V):
@@ -208,9 +425,9 @@ def test_interpolate_is_linear(mesh, V):
         get_dimension(ufl.Interpolate(length * u, V), [length]), syu.length
     )
 
-    dimensionless, factor = factorize(ufl.Interpolate(length * u, V), [length])
-    assert factor == pytest.approx([1.0])
-    assert collect_quantities(dimensionless) == []
+    factorized = factorize(ufl.Interpolate(length * u, V), [length])
+    assert factorized.factor == pytest.approx([1.0])
+    assert collect_quantities(factorized.expr) == []
 
 
 def test_interpolate_of_dimensional_expression(mesh, V):
@@ -245,10 +462,10 @@ def test_form_sum_weight_is_factorized(mesh, V):
     length = Quantity(mesh, 1.0, syu.meter, "L")
     cofunction = ufl.Cofunction(V.dual())
 
-    dimensionless, factor = factorize(length * cofunction, [length])
+    factorized = factorize(length * cofunction, [length])
 
-    assert factor == pytest.approx([1.0])
-    assert collect_quantities(dimensionless) == []
+    assert factorized.factor == pytest.approx([1.0])
+    assert collect_quantities(factorized.expr) == []
 
 
 def test_form_sum_inconsistent_components(mesh, V):
@@ -258,8 +475,10 @@ def test_form_sum_inconsistent_components(mesh, V):
     cofunction = ufl.Cofunction(V.dual())
 
     form_sum = ufl.FormSum((cofunction, length), (ufl.Cofunction(V.dual()), time))
-    with pytest.raises(RuntimeError, match="Inconsistent dimensions across components of FormSum"):
-        factorize(form_sum, [length, time], mode="check")
+    with pytest.raises(
+        InconsistentDimensions, match="Inconsistent dimensions across components of FormSum"
+    ):
+        factorize(form_sum, [length, time])
 
 
 def test_normalize_none_factor(mesh):
@@ -392,8 +611,8 @@ def test_condition_operands(mesh, V):
     length = Quantity(mesh, 1.0, syu.meter, "L")
 
     expr = ufl.conditional(ufl.gt(u_ref * u, length), u_ref, 2 * u_ref)
-    with pytest.raises(RuntimeError, match="Inconsistent dimensions"):
-        factorize(expr, [u_ref, length], mode="check")
+    with pytest.raises(InconsistentDimensions, match="Inconsistent dimensions"):
+        factorize(expr, [u_ref, length])
 
 
 def test_conditional_branches(mesh, V):
@@ -403,8 +622,8 @@ def test_conditional_branches(mesh, V):
     length = Quantity(mesh, 1.0, syu.meter, "L")
 
     expr = ufl.conditional(ufl.gt(u, 1), u_ref * u, length)
-    with pytest.raises(RuntimeError, match="Inconsistent dimensions"):
-        factorize(expr, [u_ref, length], mode="check")
+    with pytest.raises(InconsistentDimensions, match="Inconsistent dimensions"):
+        factorize(expr, [u_ref, length])
 
 
 def test_list_tensor(mesh, V):
@@ -413,5 +632,5 @@ def test_list_tensor(mesh, V):
     u_ref = Quantity(mesh, 1.0, syu.kelvin, "u_ref")
     length = Quantity(mesh, 1.0, syu.meter, "L")
 
-    with pytest.raises(RuntimeError, match="Inconsistent dimensions"):
-        factorize(ufl.as_vector([u_ref * u, length * u]), [u_ref, length], mode="check")
+    with pytest.raises(InconsistentDimensions, match="Inconsistent dimensions"):
+        factorize(ufl.as_vector([u_ref * u, length * u]), [u_ref, length])
