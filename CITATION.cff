@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it."
+type: software
+title: "ufl-units: Automated Dimensional Analysis and Scaling of Finite Element Variational Forms"
+version: "1.0.0"
+authors:
+  - family-names: "Habera"
+    given-names: "Michal"
+  - family-names: "Zilian"
+    given-names: "Andreas"
