@@ -13,3 +13,6 @@ build
 report.xml
 coverage.xml
 *.coverage*
+
+# demo output
+demo/output

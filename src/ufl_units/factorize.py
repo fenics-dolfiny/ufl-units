@@ -607,7 +607,8 @@ def normalize(
         if isinstance(factorized_expr.expr, Form):
             normalized_dict[key] = map_integrands(lambda x: x * ratio_value, factorized_expr.expr)
         else:
-            normalized_dict[key] = factorized_expr.expr * ratio_value
+            # Scalar on the left: a base form times an expression is an action in UFL
+            normalized_dict[key] = ratio_value * factorized_expr.expr
 
     print_table(rows, ["Term", "Factor", "Value (in base units)"])
     logger.info("=" * 50)

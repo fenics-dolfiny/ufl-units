@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ufl-units"
-version = "1.0.0"
+version = "1.1.0.dev0"
 description = "Physical units and dimensional analysis for UFL expressions and forms."
 authors = [
   { name = "Michal Habera", email = "michal.habera@gmail.com" },
@@ -81,6 +81,8 @@ allowed-confusables = ["σ", "×"]
 
 [tool.ruff.lint.per-file-ignores]
 "!src/**.py" = ["D"]  # no docstring linting outside of src/
+# Kept in the style of the Firedrake demo it ports: star import
+"demo/burgers.py" = ["F403", "F405"]
 
 [tool.ruff.lint.isort]
 # These rules mirror dolfiny's, including `ufl_units` being sorted as a third-party

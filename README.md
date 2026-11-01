@@ -74,16 +74,21 @@ from ufl_units.backends.firedrake import Quantity  # Quantity(scale, unit, symbo
 A Firedrake constant is not tied to a mesh, so that flavour takes no domain; the measure it is
 integrated against carries the domain instead.
 
+Step-by-step guides to adding units to an existing code:
+[doc/adding-units-dolfinx.md](doc/adding-units-dolfinx.md) and
+[doc/adding-units-firedrake.md](doc/adding-units-firedrake.md).
+
 # Demos
 
-The `demo/` folder holds the examples of the accompanying manuscript. Both need dolfinx, so
-run them in the `ufl-units (dolfinx)` devcontainer (see below), or in any environment with
-dolfinx and `ufl-units` installed:
+The `demo/` folder holds the examples of the accompanying manuscript, and a port of the
+DOLFINx elasticity demo. They need dolfinx, so run them in the `ufl-units (dolfinx)`
+devcontainer (see below), or in any environment with dolfinx and `ufl-units` installed:
 
 ```bash
 cd demo
 python3 navier_stokes.py
 python3 neo_hooke.py
+python3 elasticity.py
 ```
 
 - `navier_stokes.py` prints the Buckingham Pi analysis and the normalized terms of the
@@ -95,6 +100,26 @@ python3 neo_hooke.py
 - `neo_hooke.py` prints the Buckingham Pi analysis of Neo-Hooke hyperelasticity, the
   dimensionless numbers of the standard energy, and the normalized terms of its expansion in
   the Green-Lagrange strain.
+- `elasticity.py` follows the
+  [elasticity demo](https://docs.fenicsproject.org/dolfinx/main/python/demos/demo_elasticity.html),
+  and is the running example of the guide
+  [doc/adding-units-dolfinx.md](doc/adding-units-dolfinx.md). It prints the Buckingham Pi
+  analysis, checks the units of the forms, and normalizes them, then solves as the original.
+
+One further demo adds units to a Firedrake demo and needs Firedrake, so run it in the
+`ufl-units (firedrake)` devcontainer:
+
+```bash
+cd demo
+python3 burgers.py
+```
+
+- `burgers.py` follows the
+  [Burgers demo](https://www.firedrakeproject.org/demos/burgers.py.html), and is the running
+  example of the guide [doc/adding-units-firedrake.md](doc/adding-units-firedrake.md). It
+  prints the Buckingham Pi analysis, checks the units of the form, and normalizes the terms
+  by advection. It then solves the original form and writes the velocity to
+  `output/burgers.pvd`.
 
 # Development
 
