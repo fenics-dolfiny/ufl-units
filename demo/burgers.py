@@ -110,12 +110,15 @@ u_ref = Quantity(1.0, syu.meter / syu.second, "u_ref")
 # velocity in the direction $u$. This directional derivative can be written as
 # `dot(u,nabla_grad(u))` since `nabla_grad(u)[i,j]`$=\partial_i u_j$. Note once again that
 # for a nonlinear problem, there are no trial functions in the formulation. These will be
-# created automatically when the residual is differentiated by the nonlinear solver:
+# created automatically when the residual is differentiated by the nonlinear solver. The
+# residual is kept as a dictionary of its terms, so that each can be analysed on its own:
 
 # %%
-F = (
-    inner((u - u_) / timestep, v) + inner(dot(u, nabla_grad(u)), v) + nu * inner(grad(u), grad(v))
-) * dx
+terms = {
+    "time": inner((u - u_) / timestep, v) * dx,
+    "advection": inner(dot(u, nabla_grad(u)), v) * dx,
+    "viscous": nu * inner(grad(u), grad(v)) * dx,
+}
 
 # %% [markdown]
 # ## Dimensional analysis
@@ -124,25 +127,27 @@ F = (
 # which tests the momentum equation and so is scaled as a velocity. The analysis finds two
 # dimensionless groups, the inverse Reynolds number
 # $\nu / (l_\text{ref} u_\text{ref}) = 10^{-4}$ and the timestep
-# $\Delta t \, u_\text{ref} / l_\text{ref}$, checks that the form has the units of an
-# acceleration times a velocity times an area, and shows the size of each term relative to
-# advection.
+# $\Delta t \, u_\text{ref} / l_\text{ref}$, checks that all terms have the units of an
+# acceleration times a velocity times an area, and normalizes them by the advection term.
 
 # %%
 mapping = {mesh: l_ref, u: u_ref * u, u_: u_ref * u_, v: u_ref * v}
 quantities = [l_ref, u_ref, nu, timestep]
 ufl_units.buckingham_pi_analysis(quantities)
 
-dimension = ufl_units.get_dimension(F, quantities, mapping=mapping)
+dimension = ufl_units.get_dimension(sum(terms.values(), Form([])), quantities, mapping=mapping)
 assert syu.si.SI.get_dimension_system().equivalent_dims(dimension, syu.length**4 / syu.time**3)
 
-terms = {
-    "time": inner((u - u_) / timestep, v) * dx,
-    "advection": inner(dot(u, nabla_grad(u)), v) * dx,
-    "viscous": nu * inner(grad(u), grad(v)) * dx,
-}
 terms = ufl_units.factorize(terms, quantities, mapping=mapping)
 terms = ufl_units.normalize(terms, "advection", quantities)
+
+# %% [markdown]
+# The normalized terms add up to the residual that is solved. It is the residual of the
+# original divided by the scale of the advection term, so with all reference scales equal to
+# one in SI units, the solution is the one of the original.
+
+# %%
+F = sum(terms.values(), Form([]))
 
 # %% [markdown]
 # We now create an object for output visualisation:

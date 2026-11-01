@@ -104,7 +104,8 @@ python3 elasticity.py
   [elasticity demo](https://docs.fenicsproject.org/dolfinx/main/python/demos/demo_elasticity.html),
   and is the running example of the guide
   [doc/adding-units-dolfinx.md](doc/adding-units-dolfinx.md). It prints the Buckingham Pi
-  analysis, checks the units of the forms, and normalizes them, then solves as the original.
+  analysis, checks the units of the residual, normalizes its terms by the stiffness, and
+  solves the normalized problem.
 
 One further demo adds units to a Firedrake demo and needs Firedrake, so run it in the
 `ufl-units (firedrake)` devcontainer:
@@ -118,7 +119,7 @@ python3 burgers.py
   [Burgers demo](https://www.firedrakeproject.org/demos/burgers.py.html), and is the running
   example of the guide [doc/adding-units-firedrake.md](doc/adding-units-firedrake.md). It
   prints the Buckingham Pi analysis, checks the units of the form, and normalizes the terms
-  by advection. It then solves the original form and writes the velocity to
+  by advection. It then solves the normalized residual and writes the velocity to
   `output/burgers.pvd`.
 
 # Development

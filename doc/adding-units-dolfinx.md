@@ -72,14 +72,14 @@ l_ref = Quantity(msh, 1.0, syu.meter, "l_ref")
 u_ref = Quantity(msh, 1.0, syu.meter, "u_ref")
 ```
 
-`ufl_units` works on UFL forms, so analyse `a` and `L` before passing them to `form`:
+Finally, write the residual `a - L` as a dictionary of its terms, still as UFL forms. This one
+dictionary is analysed in step 3, and summed back and compiled in step 4:
 
 ```python
-a = ufl.inner(σ(u), ufl.grad(v)) * ufl.dx
-L = ufl.inner(f, v) * ufl.dx
-# ... steps 2 and 3 ...
-a = form(a)
-L = form(L)
+terms = {
+    "stiffness": ufl.inner(σ(u), ufl.grad(v)) * ufl.dx,
+    "load": -ufl.inner(f, v) * ufl.dx,
+}
 ```
 
 ## 2. Write the mapping
@@ -93,7 +93,7 @@ mapping = {msh.ufl_domain(): l_ref, u: u_ref * u, v: u_ref * v}
 `u: u_ref * u` means "the displacement is `u_ref` times the number stored in `u`". The mesh
 key is the UFL domain, `msh.ufl_domain()`. Map every function that holds a physical quantity,
 and the test functions too. Scale a test function like the unknown it tests: `v` is a virtual
-displacement, so both forms become a virtual work. A function that is not mapped is
+displacement, so both terms become a virtual work. A function that is not mapped is
 dimensionless.
 
 ## 3. Analyse the form
@@ -126,10 +126,10 @@ Pi_2  | u_ref/l_ref         | 1
 
 `Pi_1` is the strain the rotation causes.
 
-**Consistency.** Both forms must have the same units, here an energy:
+**Consistency.** Both terms must have the same units, here an energy:
 
 ```python
-dimension = ufl_units.get_dimension(a - L, quantities, mapping=mapping)
+dimension = ufl_units.get_dimension(sum(terms.values(), ufl.Form([])), quantities, mapping=mapping)
 assert syu.si.SI.get_dimension_system().equivalent_dims(dimension, syu.energy)
 ```
 
@@ -142,19 +142,18 @@ Scales: E*l_ref*u_ref**2 != l_ref**4*u_ref.
 Dimension(length**3*pressure) != Dimension(length**5).
 ```
 
-**Relative size of the terms.** Put the terms in a dictionary, factorize it, and normalize by
-one term:
+**Normalization.** Factorize the terms and divide them all by the scale of one of them:
 
 ```python
-terms = ufl_units.factorize({"a": a, "L": L}, quantities, mapping=mapping)
-terms = ufl_units.normalize(terms, "a", quantities)
+terms = ufl_units.factorize(terms, quantities, mapping=mapping)
+terms = ufl_units.normalize(terms, "stiffness", quantities)
 ```
 
 ```
-Term | Factor                      | Value (in base units)
------+-----------------------------+----------------------
-a    | 1                           | 1.000
-L    | l_ref**3*rho*ω**2/(E*u_ref) | 0.0009000
+Term      | Factor                      | Value (in base units)
+----------+-----------------------------+----------------------
+stiffness | 1                           | 1.000
+load      | l_ref**3*rho*ω**2/(E*u_ref) | 0.0009000
 ```
 
 The load is 9·10⁻⁴ of the stiffness at a displacement of 1 m, so the displacements are about
@@ -162,9 +161,19 @@ a millimetre.
 
 ## 4. Solve
 
-Compile and solve `a` and `L` as before; they are the same forms, so the solution is
-unchanged. Python code that needs a constant's value as a number uses `q.factor`, the value
-in base units.
+Sum the normalized terms back into the residual, split it into the bilinear and linear
+forms, and compile them:
+
+```python
+F = sum(terms.values(), ufl.Form([]))
+a = form(ufl.lhs(F))
+L = form(ufl.rhs(F))
+```
+
+The rest of the solver is unchanged. `F` is the original residual divided by the scale of the
+stiffness. The mapping describes the numbers the code holds (a mesh and displacements in
+metres), so the solution is the one of the original code. Python code that needs a constant's
+value as a number uses `q.factor`, the value in base units.
 
 ## Tips
 

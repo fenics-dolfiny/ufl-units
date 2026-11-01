@@ -161,9 +161,14 @@ def σ(v):
 gdim = msh.geometry.dim
 V = functionspace(msh, ("Lagrange", 1, (gdim,)))
 u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
-a = ufl.inner(σ(u), ufl.grad(v)) * ufl.dx
-L = ufl.inner(f, v) * ufl.dx
+terms = {
+    "stiffness": ufl.inner(σ(u), ufl.grad(v)) * ufl.dx,
+    "load": -ufl.inner(f, v) * ufl.dx,
+}
 
+# The two terms of the residual are kept in a dictionary, so that each
+# can be analysed on its own.
+#
 # ## Dimensional analysis
 #
 # The mesh is in units of $l_\text{ref} = 1\,\mathrm{m}$ and the
@@ -177,26 +182,31 @@ mapping = {msh.ufl_domain(): l_ref, u: u_ref * u, v: u_ref * v}
 
 # The analysis finds two dimensionless groups: $\rho \omega^2
 # l_\text{ref}^2 / E = 9 \cdot 10^{-4}$, the strain the rotation
-# causes, and $u_\text{ref} / l_\text{ref}$. It checks that both forms
-# have the units of an energy, the virtual work, and shows that, relative to `a`, `L`
-# carries $9 \cdot 10^{-4}$: the displacements are about a millimetre.
+# causes, and $u_\text{ref} / l_\text{ref}$. It checks that both terms
+# have the units of an energy, the virtual work, and normalizes them by
+# the stiffness. The load then carries $9 \cdot 10^{-4}$: the
+# displacements are about a millimetre.
 
 # +
 quantities = [l_ref, ω, E, ρ, u_ref]
 ufl_units.buckingham_pi_analysis(quantities)
 
-dimension = ufl_units.get_dimension(a - L, quantities, mapping=mapping)
+dimension = ufl_units.get_dimension(sum(terms.values(), ufl.Form([])), quantities, mapping=mapping)
 assert syu.si.SI.get_dimension_system().equivalent_dims(dimension, syu.energy)
 
-terms = ufl_units.factorize({"a": a, "L": L}, quantities, mapping=mapping)
-terms = ufl_units.normalize(terms, "a", quantities)
+terms = ufl_units.factorize(terms, quantities, mapping=mapping)
+terms = ufl_units.normalize(terms, "stiffness", quantities)
 # -
 
-# The forms are compiled as in the original. The quantities hold their
-# values in SI units, so the solution is the one of the original.
+# The normalized terms add up to the residual, which is split into the
+# bilinear and linear forms that are solved. It is the residual of the
+# original divided by the scale of the stiffness, so with all reference
+# scales equal to one in SI units, the solution is the one of the
+# original.
 
-a = form(a)
-L = form(L)
+F = sum(terms.values(), ufl.Form([]))
+a = form(ufl.lhs(F))
+L = form(ufl.rhs(F))
 
 # A homogeneous (zero) boundary condition is created on $x_0 = 0$ and
 # $x_1 = 1$ by finding all facets on these boundaries, and then creating
