@@ -481,6 +481,21 @@ def test_form_sum_inconsistent_components(mesh, V):
         factorize(form_sum, [length, time])
 
 
+def test_normalize_form_sum(mesh, V):
+    """A sum of base forms is scaled by the ratio of factors, not acted on by it."""
+    length = Quantity(mesh, 1.0, syu.meter, "L")
+    v = ufl.TestFunction(V)
+
+    factorized = factorize(
+        {"reference": length**2 * v * ufl.dx, "source": length * ufl.Cofunction(V.dual())},
+        [length],
+    )
+    normalized = normalize(factorized, "reference", [length])
+
+    assert isinstance(normalized["source"], ufl.FormSum)
+    assert factorize(normalized["source"], [length]).factor == pytest.approx([-1.0])
+
+
 def test_normalize_none_factor(mesh):
     """An expression whose factor could not be determined cannot be normalized."""
     length = Quantity(mesh, 1.0, syu.meter, "L")
